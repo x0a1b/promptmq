@@ -33,7 +33,7 @@ func TestBasicSyncModes(t *testing.T) {
 			// Create unique temporary directory
 			tempDir := t.TempDir()
 			unique := fmt.Sprintf("sync_test_%d", time.Now().UnixNano())
-			
+
 			cfg := &config.Config{
 				Storage: config.StorageConfig{
 					DataDir:         filepath.Join(tempDir, unique, "data"),
@@ -51,7 +51,7 @@ func TestBasicSyncModes(t *testing.T) {
 					Compaction: config.CompactionConfig{
 						MaxMessageAge:     24 * time.Hour,
 						MaxWALSize:        10 * 1024 * 1024, // 10MB
-						CheckInterval:     1 * time.Hour,     // Disable for test
+						CheckInterval:     1 * time.Hour,    // Disable for test
 						ConcurrentWorkers: 1,
 						BatchSize:         100,
 					},
@@ -97,13 +97,13 @@ func TestBasicSyncModes(t *testing.T) {
 
 			// Verify all messages were persisted
 			stats := manager.GetStats()
-			assert.Equal(t, uint64(messageCount), stats["total_messages"], 
+			assert.Equal(t, uint64(messageCount), stats["total_messages"],
 				"All messages should be persisted in %s mode", sm.name)
-			assert.Equal(t, 1, stats["topic_count"], 
+			assert.Equal(t, 1, stats["topic_count"],
 				"Should have one topic in %s mode", sm.name)
 
 			// Verify sync mode in stats
-			assert.Equal(t, sm.mode, stats["sync_mode"], 
+			assert.Equal(t, sm.mode, stats["sync_mode"],
 				"Config should report correct sync mode")
 
 			t.Logf("✓ %s mode: Successfully persisted %d messages", sm.name, messageCount)
@@ -115,7 +115,7 @@ func TestBasicSyncModes(t *testing.T) {
 func TestImmediateSyncDurability(t *testing.T) {
 	tempDir := t.TempDir()
 	unique := fmt.Sprintf("immediate_test_%d", time.Now().UnixNano())
-	
+
 	cfg := &config.Config{
 		Storage: config.StorageConfig{
 			DataDir:         filepath.Join(tempDir, unique, "data"),
@@ -191,7 +191,7 @@ func TestImmediateSyncDurability(t *testing.T) {
 	// Verify 100% recovery with immediate sync
 	stats2 := manager2.GetStats()
 	recoveredCount := stats2["total_messages"].(uint64)
-	assert.Equal(t, uint64(messageCount), recoveredCount, 
+	assert.Equal(t, uint64(messageCount), recoveredCount,
 		"Immediate sync must guarantee 100%% message recovery")
 
 	// Test that we can read all messages
@@ -202,13 +202,13 @@ func TestImmediateSyncDurability(t *testing.T) {
 	// Verify message integrity
 	for i, msg := range messages {
 		expectedPayload := fmt.Sprintf("immediate durability test %d", i)
-		assert.Equal(t, expectedPayload, string(msg.Payload), 
+		assert.Equal(t, expectedPayload, string(msg.Payload),
 			"Message %d payload should be intact", i)
 		assert.Equal(t, "immediate/durability", msg.Topic)
 		assert.Equal(t, "immediate-client", msg.ClientID)
 	}
 
-	t.Logf("✓ Immediate sync durability: 100%% recovery (%d/%d messages)", 
+	t.Logf("✓ Immediate sync durability: 100%% recovery (%d/%d messages)",
 		recoveredCount, messageCount)
 }
 
@@ -217,7 +217,7 @@ func TestBatchSyncBehavior(t *testing.T) {
 	tempDir := t.TempDir()
 	unique := fmt.Sprintf("batch_test_%d", time.Now().UnixNano())
 	batchSize := 5
-	
+
 	cfg := &config.Config{
 		Storage: config.StorageConfig{
 			DataDir:         filepath.Join(tempDir, unique, "data"),
@@ -301,7 +301,7 @@ func TestBatchSyncBehavior(t *testing.T) {
 func TestConfigValidation(t *testing.T) {
 	tempDir := t.TempDir()
 	unique := fmt.Sprintf("config_test_%d", time.Now().UnixNano())
-	
+
 	// Test invalid sync mode
 	cfg := &config.Config{
 		Storage: config.StorageConfig{
@@ -352,7 +352,7 @@ func TestConfigValidation(t *testing.T) {
 
 	stats := manager.GetStats()
 	assert.Equal(t, uint64(1), stats["total_messages"])
-	
+
 	t.Log("✓ Config validation: Invalid sync mode handled gracefully")
 }
 

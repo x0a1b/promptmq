@@ -14,9 +14,9 @@ import (
 // BenchmarkSyncModePerformance compares performance of all sync modes
 func BenchmarkSyncModePerformance(b *testing.B) {
 	syncModes := []struct {
-		name string
-		mode string
-		batchSize int
+		name         string
+		mode         string
+		batchSize    int
 		syncInterval time.Duration
 	}{
 		{"Immediate", "immediate", 0, 0},
@@ -49,7 +49,7 @@ func BenchmarkSyncModePerformance(b *testing.B) {
 			}
 
 			b.ResetTimer()
-			
+
 			// Benchmark message throughput
 			for i := 0; i < b.N; i++ {
 				msg := &Message{
@@ -68,7 +68,7 @@ func BenchmarkSyncModePerformance(b *testing.B) {
 			}
 
 			b.StopTimer()
-			
+
 			// Ensure all messages are persisted
 			if sm.mode != "immediate" {
 				manager.ForceFlush()
@@ -80,7 +80,7 @@ func BenchmarkSyncModePerformance(b *testing.B) {
 // BenchmarkWriteLatency measures write latency for different sync modes
 func BenchmarkWriteLatency(b *testing.B) {
 	syncModes := []string{"immediate", "periodic", "batch"}
-	
+
 	for _, mode := range syncModes {
 		b.Run(mode, func(b *testing.B) {
 			cfg := createBenchmarkConfig(b)
@@ -116,7 +116,7 @@ func BenchmarkWriteLatency(b *testing.B) {
 				start := time.Now()
 				err := manager.persistMessage(msg)
 				duration := time.Since(start)
-				
+
 				if err != nil {
 					b.Fatalf("Failed to persist message: %v", err)
 				}
@@ -133,7 +133,7 @@ func BenchmarkWriteLatency(b *testing.B) {
 // BenchmarkRecoveryPerformance measures recovery time for different message counts
 func BenchmarkRecoveryPerformance(b *testing.B) {
 	messageCounts := []int{100, 1000, 10000}
-	
+
 	for _, count := range messageCounts {
 		b.Run(fmt.Sprintf("%d_messages", count), func(b *testing.B) {
 			cfg := createBenchmarkConfig(b)
@@ -174,7 +174,7 @@ func BenchmarkRecoveryPerformance(b *testing.B) {
 
 			// Phase 2: Benchmark recovery
 			b.ResetTimer()
-			
+
 			for i := 0; i < b.N; i++ {
 				manager2, err := New(cfg, zerolog.New(nil).Level(zerolog.Disabled))
 				if err != nil {
@@ -186,7 +186,7 @@ func BenchmarkRecoveryPerformance(b *testing.B) {
 				start := time.Now()
 				err = manager2.Start(ctx2)
 				recoveryTime := time.Since(start)
-				
+
 				if err != nil {
 					cancel2()
 					manager2.StopManager()
@@ -195,7 +195,7 @@ func BenchmarkRecoveryPerformance(b *testing.B) {
 
 				stats := manager2.GetStats()
 				recoveredCount := stats["total_messages"].(uint64)
-				
+
 				if recoveredCount != uint64(count) {
 					b.Logf("Warning: Expected %d messages, recovered %d", count, recoveredCount)
 				}
@@ -215,7 +215,7 @@ func BenchmarkRecoveryPerformance(b *testing.B) {
 func BenchmarkConcurrentWrites(b *testing.B) {
 	syncModes := []string{"immediate", "periodic", "batch"}
 	workerCounts := []int{1, 4, 8}
-	
+
 	for _, mode := range syncModes {
 		for _, workers := range workerCounts {
 			b.Run(fmt.Sprintf("%s_%d_workers", mode, workers), func(b *testing.B) {
@@ -290,7 +290,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		msg := &Message{
 			ID:        uint64(i + 1),
 			Topic:     fmt.Sprintf("memory/test/%d", i%100), // 100 topics
-			Payload:   make([]byte, 1024), // 1KB payload
+			Payload:   make([]byte, 1024),                   // 1KB payload
 			QoS:       1,
 			ClientID:  "memory-test-client",
 			Timestamp: time.Now(),
@@ -313,7 +313,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 // BenchmarkBatchSizeImpact measures impact of different batch sizes
 func BenchmarkBatchSizeImpact(b *testing.B) {
 	batchSizes := []int{1, 10, 50, 100, 500}
-	
+
 	for _, batchSize := range batchSizes {
 		b.Run(fmt.Sprintf("batch_%d", batchSize), func(b *testing.B) {
 			cfg := createBenchmarkConfig(b)
@@ -367,9 +367,9 @@ func BenchmarkDurabilityVsThroughput(b *testing.B) {
 		memBuffer   uint64
 		expectedOps int // Expected ops/sec (approximate)
 	}{
-		{"MaxThroughput", "periodic", false, 100 * 1024 * 1024, 500000},  // 100MB buffer, no fsync
-		{"Balanced", "batch", false, 10 * 1024 * 1024, 200000},           // 10MB buffer, batch sync
-		{"MaxDurability", "immediate", true, 1024, 50000},                 // 1KB buffer, immediate fsync
+		{"MaxThroughput", "periodic", false, 100 * 1024 * 1024, 500000}, // 100MB buffer, no fsync
+		{"Balanced", "batch", false, 10 * 1024 * 1024, 200000},          // 10MB buffer, batch sync
+		{"MaxDurability", "immediate", true, 1024, 50000},               // 1KB buffer, immediate fsync
 	}
 
 	for _, cfg_test := range configurations {
@@ -423,7 +423,7 @@ func BenchmarkDurabilityVsThroughput(b *testing.B) {
 				manager.ForceFlush()
 			}
 
-			b.Logf("%s: %.0f ops/sec (target: %d ops/sec)", 
+			b.Logf("%s: %.0f ops/sec (target: %d ops/sec)",
 				cfg_test.name, opsPerSec, cfg_test.expectedOps)
 
 			// Report whether we met performance expectations
@@ -436,7 +436,7 @@ func BenchmarkDurabilityVsThroughput(b *testing.B) {
 
 func createBenchmarkConfig(b *testing.B) *config.Config {
 	tempDir := b.TempDir()
-	
+
 	return &config.Config{
 		Storage: config.StorageConfig{
 			DataDir:         tempDir + "/data",
@@ -454,7 +454,7 @@ func createBenchmarkConfig(b *testing.B) *config.Config {
 			Compaction: config.CompactionConfig{
 				MaxMessageAge:     24 * time.Hour,
 				MaxWALSize:        100 * 1024 * 1024, // 100MB
-				CheckInterval:     1 * time.Hour,      // Disabled for benchmarks
+				CheckInterval:     1 * time.Hour,     // Disabled for benchmarks
 				ConcurrentWorkers: 1,
 				BatchSize:         1000,
 			},

@@ -65,7 +65,7 @@ func TestAtomicityGuarantees(t *testing.T) {
 
 			// Verify atomicity by checking all messages are present
 			stats := manager.GetStats()
-			assert.Equal(t, uint64(5), stats["total_messages"], 
+			assert.Equal(t, uint64(5), stats["total_messages"],
 				"All messages in atomic operation should be persisted")
 
 			// Test that partial operations don't leave system in inconsistent state
@@ -113,16 +113,16 @@ func TestConsistencyGuarantees(t *testing.T) {
 	for _, topic := range topics {
 		messages, err := manager.GetMessagesByTopic(topic, messagesPerTopic+10)
 		require.NoError(t, err)
-		assert.Len(t, messages, messagesPerTopic, 
+		assert.Len(t, messages, messagesPerTopic,
 			"Topic %s should have exactly %d messages", topic, messagesPerTopic)
 	}
 
 	// Verify global consistency
 	stats := manager.GetStats()
 	expectedTotal := uint64(len(topics) * messagesPerTopic)
-	assert.Equal(t, expectedTotal, stats["total_messages"], 
+	assert.Equal(t, expectedTotal, stats["total_messages"],
 		"Total message count should be consistent")
-	assert.Equal(t, len(topics), stats["topic_count"], 
+	assert.Equal(t, len(topics), stats["topic_count"],
 		"Topic count should be consistent")
 }
 
@@ -151,7 +151,7 @@ func TestIsolationGuarantees(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
+
 			for i := 0; i < messagesPerWorker; i++ {
 				msg := &Message{
 					ID:        uint64(id*1000 + i + 1), // Unique ID per worker
@@ -178,16 +178,16 @@ func TestIsolationGuarantees(t *testing.T) {
 		topic := fmt.Sprintf("isolation/worker_%d", workerID)
 		messages, err := manager.GetMessagesByTopic(topic, messagesPerWorker+10)
 		require.NoError(t, err)
-		assert.Len(t, messages, messagesPerWorker, 
+		assert.Len(t, messages, messagesPerWorker,
 			"Worker %d topic should have exactly %d messages", workerID, messagesPerWorker)
 	}
 
 	// Verify total isolation
 	stats := manager.GetStats()
 	expectedTotal := uint64(numWorkers * messagesPerWorker)
-	assert.Equal(t, expectedTotal, stats["total_messages"], 
+	assert.Equal(t, expectedTotal, stats["total_messages"],
 		"Total messages should equal sum of all worker messages")
-	assert.Equal(t, numWorkers, stats["topic_count"], 
+	assert.Equal(t, numWorkers, stats["topic_count"],
 		"Should have one topic per worker")
 }
 
@@ -199,10 +199,10 @@ func TestDurabilityGuarantees(t *testing.T) {
 		forceFsync    bool
 		expectedRatio float64 // Minimum expected recovery ratio
 	}{
-		{"MaxDurability", "immediate", true, 1.0},     // 100% recovery expected
-		{"HighDurability", "immediate", false, 0.95},  // 95% recovery expected
-		{"MediumDurability", "batch", false, 0.8},     // 80% recovery expected
-		{"BasicDurability", "periodic", false, 0.5},   // 50% recovery expected
+		{"MaxDurability", "immediate", true, 1.0},    // 100% recovery expected
+		{"HighDurability", "immediate", false, 0.95}, // 95% recovery expected
+		{"MediumDurability", "batch", false, 0.8},    // 80% recovery expected
+		{"BasicDurability", "periodic", false, 0.5},  // 50% recovery expected
 	}
 
 	for _, test := range durabilityTests {
@@ -243,7 +243,7 @@ func TestDurabilityGuarantees(t *testing.T) {
 				err = manager1.ForceFlush()
 				require.NoError(t, err)
 			}
-			
+
 			// Allow some time for periodic sync
 			if test.syncMode == "periodic" {
 				time.Sleep(150 * time.Millisecond) // Allow sync interval
@@ -274,7 +274,7 @@ func TestDurabilityGuarantees(t *testing.T) {
 				"%s: Recovery ratio %.2f should be at least %.2f (recovered %d/%d)",
 				test.name, recoveryRatio, test.expectedRatio, recoveredCount, messageCount)
 
-			t.Logf("%s: Recovered %d/%d messages (%.1f%% recovery ratio)", 
+			t.Logf("%s: Recovered %d/%d messages (%.1f%% recovery ratio)",
 				test.name, recoveredCount, messageCount, recoveryRatio*100)
 		})
 	}
@@ -300,7 +300,7 @@ func TestACIDCompliance(t *testing.T) {
 		// ACID Test: Complex multi-topic transaction-like operation
 		batchSize := 20
 		topics := []string{"acid/topic1", "acid/topic2", "acid/topic3"}
-		
+
 		// Atomicity: Write messages across multiple topics
 		for i := 0; i < batchSize; i++ {
 			for topicIdx, topic := range topics {
@@ -321,13 +321,13 @@ func TestACIDCompliance(t *testing.T) {
 		// Consistency: Verify data integrity
 		stats := manager.GetStats()
 		expectedMessages := uint64(batchSize * len(topics))
-		assert.Equal(t, expectedMessages, stats["total_messages"], 
+		assert.Equal(t, expectedMessages, stats["total_messages"],
 			"Consistency: Total message count must be exact")
 
 		for _, topic := range topics {
 			messages, err := manager.GetMessagesByTopic(topic, batchSize+10)
 			require.NoError(t, err)
-			assert.Len(t, messages, batchSize, 
+			assert.Len(t, messages, batchSize,
 				"Consistency: Each topic must have exact message count")
 		}
 
@@ -339,7 +339,7 @@ func TestACIDCompliance(t *testing.T) {
 			wg.Add(1)
 			go func(workerID int) {
 				defer wg.Done()
-				
+
 				msg := &Message{
 					ID:        uint64(10000 + workerID), // High ID to avoid conflicts
 					Topic:     fmt.Sprintf("acid/isolation_%d", workerID),
@@ -445,7 +445,7 @@ func TestTransactionLikeSemantics(t *testing.T) {
 	// Before force flush, batch might not be persisted
 	// This simulates transaction-like behavior where uncommitted changes
 	// may not be visible until commit (force flush)
-	
+
 	// Force commit the partial batch
 	err = manager.ForceFlush()
 	require.NoError(t, err)
@@ -475,20 +475,20 @@ func TestDataIntegrityUnderStress(t *testing.T) {
 	numWorkers := 8
 	messagesPerWorker := 100
 	var wg sync.WaitGroup
-	
+
 	messagesSent := make([][]uint64, numWorkers) // Track message IDs per worker
-	
+
 	for workerID := 0; workerID < numWorkers; workerID++ {
 		wg.Add(1)
 		messagesSent[workerID] = make([]uint64, messagesPerWorker)
-		
+
 		go func(id int) {
 			defer wg.Done()
-			
+
 			for i := 0; i < messagesPerWorker; i++ {
 				msgID := uint64(id*10000 + i + 1) // Ensure unique IDs
 				messagesSent[id][i] = msgID
-				
+
 				msg := &Message{
 					ID:        msgID,
 					Topic:     fmt.Sprintf("stress/worker_%d", id),
@@ -500,7 +500,7 @@ func TestDataIntegrityUnderStress(t *testing.T) {
 
 				err := manager.persistMessage(msg)
 				require.NoError(t, err, "Stress test: All messages must be persisted")
-				
+
 				// Add small random delay to increase concurrency stress
 				if i%10 == 0 {
 					time.Sleep(time.Microsecond)
@@ -526,6 +526,6 @@ func TestDataIntegrityUnderStress(t *testing.T) {
 			"Stress test: Worker %d should have all messages", workerID)
 	}
 
-	t.Logf("Stress test completed: %d workers × %d messages = %d total messages", 
+	t.Logf("Stress test completed: %d workers × %d messages = %d total messages",
 		numWorkers, messagesPerWorker, expectedTotal)
 }

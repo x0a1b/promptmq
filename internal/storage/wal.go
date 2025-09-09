@@ -533,12 +533,12 @@ func (w *WAL) Stats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"path":             w.path,
-		"size":             w.offset,
-		"nosync":           w.noSync,
-		"sync_mode":        syncModeStr,
-		"batch_size":       w.batchSyncSize,
-		"batch_counter":    w.batchCounter.Load(),
-		"pending_batch":    w.batchCounter.Load() > 0,
+		"path":          w.path,
+		"size":          w.offset,
+		"nosync":        w.noSync,
+		"sync_mode":     syncModeStr,
+		"batch_size":    w.batchSyncSize,
+		"batch_counter": w.batchCounter.Load(),
+		"pending_batch": w.batchCounter.Load() > 0,
 	}
 }
