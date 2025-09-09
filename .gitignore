@@ -1,0 +1,100 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+promptmq
+promptmq.exe
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# PromptMQ specific
+# Data directories
+data/
+wal/
+logs/
+*.log
+
+# Test artifacts
+test_data/
+test_wal/
+coverage.out
+coverage.html
+
+# Configuration files (keep examples)
+# Ignore actual config files but keep examples
+config.yaml
+config.json
+*.local.yaml
+*.local.json
+
+# Runtime files
+*.pid
+*.sock
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+*.bak
+*.backup
+
+# Database files
+*.db
+*.badger
+
+# Certificates and keys (if any)
+*.pem
+*.key
+*.crt
+*.p12
+
+# Profiling files
+*.prof
+*.trace
+
+# Benchmark results
+*.bench
+
+# Docker
+Dockerfile.local
+docker-compose.override.yml
+
+# Build artifacts
+dist/
+build/
+bin/
+
+# Environment files
+.env
+.env.local
+.env.*.local

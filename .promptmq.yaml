@@ -1,0 +1,55 @@
+# PromptMQ Configuration File
+# This file demonstrates all available configuration options
+
+# Logging configuration
+log:
+  level: "info"          # trace, debug, info, warn, error, fatal, panic
+  format: "json"         # json, console
+
+# Server configuration
+server:
+  bind: "0.0.0.0:1883"          # TCP bind address for MQTT
+  ws-bind: "0.0.0.0:8080"       # WebSocket bind address
+  tls: false                     # Enable TLS encryption
+  tls-cert: ""                   # TLS certificate file path
+  tls-key: ""                    # TLS private key file path
+  read-buffer: 4096              # Socket read buffer size
+  write-buffer: 4096             # Socket write buffer size
+  read-timeout: "30s"            # Socket read timeout
+  write-timeout: "30s"           # Socket write timeout
+  daemon: false                  # Run as daemon (background)
+  pid-file: ""                   # PID file path for daemon mode
+
+# MQTT protocol configuration
+mqtt:
+  max-packet-size: 65535         # Maximum MQTT packet size
+  max-client-id-len: 65535       # Maximum client ID length
+  max-topic-len: 65535           # Maximum topic length
+  max-qos: 2                     # Maximum QoS level (0, 1, 2)
+  keep-alive: 60                 # Default keep-alive interval in seconds
+  max-inflight: 20               # Maximum in-flight messages per client
+  max-connections: 10000         # Maximum concurrent connections
+  retain-available: true         # Enable retained message support
+  wildcard-available: true       # Enable wildcard subscription support
+  shared-sub-available: true     # Enable shared subscription support
+
+# Storage and persistence configuration
+storage:
+  data-dir: "./data"             # Data directory for persistent storage
+  wal-dir: "./wal"               # WAL directory for write-ahead logging
+  memory-buffer: 268435456       # Memory buffer size in bytes (256MB)
+  wal-sync-interval: "100ms"     # WAL sync interval
+  wal-no-sync: false             # Disable WAL fsync (better perf, less durability)
+
+# Clustering configuration
+cluster:
+  enabled: false                 # Enable clustering mode
+  bind: "0.0.0.0:7946"          # Cluster bind address
+  peers: []                      # List of cluster peer addresses
+  node-id: ""                    # Node ID (auto-generated if empty)
+
+# Metrics and monitoring configuration
+metrics:
+  enabled: true                  # Enable metrics endpoint
+  bind: "0.0.0.0:9090"          # Metrics endpoint bind address
+  path: "/metrics"               # Metrics endpoint path
