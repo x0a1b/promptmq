@@ -1,0 +1,62 @@
+# PromptMQ Production Configuration
+# Enterprise-grade settings for production deployment
+
+log:
+  level: "info"
+  format: "json"               # Structured logging for production
+
+server:
+  bind: "0.0.0.0:1883"         # Accept connections from all interfaces
+  ws-bind: "0.0.0.0:8080"      # WebSocket support
+  read-timeout: "30s"
+  write-timeout: "30s"
+  daemon: true                 # Run as background daemon
+  pid-file: "/var/run/promptmq.pid"
+
+# MQTT Protocol Settings
+mqtt:
+  max-packet-size: 65535
+  max-client-id-len: 65535
+  max-topic-len: 65535
+  max-qos: 2
+  keep-alive: 60
+  max-inflight: 20
+  max-connections: 10000       # High connection limit for production
+  retain-available: true
+  wildcard-available: true
+  shared-sub-available: true
+
+# Storage Configuration - High Performance
+storage:
+  data-dir: "/var/lib/promptmq/data"
+  wal-dir: "/var/lib/promptmq/wal"
+  memory-buffer: 268435456     # 256MB buffer for high throughput
+  
+  # WAL Settings - Maximum throughput
+  wal:
+    sync-mode: "periodic"      # Optimized for throughput
+    sync-interval: 100ms
+    batch-sync-size: 100
+    force-fsync: false         # Disable for maximum performance
+    crash-recovery-validation: false
+    
+  # Compaction Settings - Production optimized
+  compaction:
+    max-message-age: "2h"      # 2-hour message retention
+    max-wal-size: 104857600    # 100MB WAL files
+    check-interval: "5m"       # Every 5 minutes
+    concurrent-workers: 2      # Parallel compaction
+    batch-size: 1000
+
+# Clustering Configuration
+cluster:
+  enabled: false               # Enable for multi-node deployment
+  bind: "0.0.0.0:7946"
+  peers: []                    # Add cluster peer addresses
+  # node-id: "promptmq-01"     # Unique node identifier
+
+# Metrics & Monitoring
+metrics:
+  enabled: true
+  bind: "0.0.0.0:9090"         # Prometheus metrics endpoint
+  path: "/metrics"

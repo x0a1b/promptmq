@@ -1,0 +1,70 @@
+# PromptMQ Cluster Configuration
+# Multi-node deployment with high availability
+
+log:
+  level: "info"
+  format: "json"
+
+server:
+  bind: "0.0.0.0:1883"
+  ws-bind: "0.0.0.0:8080"
+  read-timeout: "30s"
+  write-timeout: "30s"
+
+# MQTT Protocol Settings
+mqtt:
+  max-packet-size: 65535
+  max-client-id-len: 65535
+  max-topic-len: 65535
+  max-qos: 2
+  keep-alive: 60
+  max-inflight: 20
+  max-connections: 20000       # Higher limit for clustered deployment
+  retain-available: true
+  wildcard-available: true
+  shared-sub-available: true
+
+# Storage Configuration - Cluster optimized
+storage:
+  data-dir: "/var/lib/promptmq/data"
+  wal-dir: "/var/lib/promptmq/wal"
+  memory-buffer: 268435456     # 256MB buffer
+  
+  # WAL Settings - Balanced for cluster
+  wal:
+    sync-mode: "batch"         # Batch sync for cluster consistency
+    sync-interval: 100ms
+    batch-sync-size: 100
+    force-fsync: false
+    crash-recovery-validation: true
+    
+  # Compaction Settings
+  compaction:
+    max-message-age: "4h"      # Longer retention for cluster sync
+    max-wal-size: 104857600    # 100MB WAL files
+    check-interval: "5m"
+    concurrent-workers: 2
+    batch-size: 1000
+
+# Clustering Configuration - EDIT FOR YOUR DEPLOYMENT
+cluster:
+  enabled: true
+  bind: "0.0.0.0:7946"         # Cluster communication port
+  node-id: "promptmq-01"       # CHANGE: Unique node identifier
+  peers:                       # CHANGE: Add all cluster node addresses
+    - "promptmq-01.local:7946"
+    - "promptmq-02.local:7946"
+    - "promptmq-03.local:7946"
+
+# Metrics & Monitoring
+metrics:
+  enabled: true
+  bind: "0.0.0.0:9090"
+  path: "/metrics"
+
+# Additional cluster considerations:
+# 1. Each node should have a unique node-id
+# 2. All nodes should list all peer addresses in the peers array
+# 3. Ensure port 7946 is open between cluster nodes
+# 4. Use consistent data and WAL directories across nodes
+# 5. Consider using persistent volumes in containerized deployments

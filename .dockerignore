@@ -1,0 +1,45 @@
+# Build artifacts
+bin/
+tmp/
+*.log
+*.tmp
+*.swp
+*~
+
+# Development files
+.air.toml
+build-errors.log
+
+# Data directories
+data/
+wal/
+dev-data/
+dev-wal/
+
+# Git
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+coverage/
+*.out
+
+# Documentation
+*.md
+docs/
+
+# Examples (keep only what's needed)
+examples/*.yaml
+examples/*.yml
+
+# Keep essential files
+!examples/production.yaml
