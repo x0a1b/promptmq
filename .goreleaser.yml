@@ -1,0 +1,110 @@
+project_name: promptmq
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: promptmq
+    binary: promptmq
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin  
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser
+    main: ./main.go
+
+archives:
+  - id: promptmq
+    name_template: >-
+      {{- .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end -}}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - CONTRIBUTING.md
+      - examples/**/*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '^build:'
+      - '^style:'
+      - '^refactor:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: 'New Features'
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: 'Performance Improvements'
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 2
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  name_template: "Release {{.Tag}}"
+  header: |
+    ## PromptMQ Release {{.Tag}}
+    
+    PromptMQ is a high-performance MQTT broker built in Go with persistent storage and clustering capabilities.
+    
+    ### 📦 Installation
+    
+    Download the appropriate binary for your platform from the assets below, extract it, and run:
+    
+    ```bash
+    ./promptmq server --config config.yaml
+    ```
+    
+    ### 🔍 Verification
+    
+    All binaries are checksummed. Verify downloads with:
+    ```bash
+    sha256sum -c checksums.txt
+    ```
+    
+    **Full Changelog**: https://github.com/{{.Env.GITHUB_REPOSITORY}}/compare/{{.PreviousTag}}...{{.Tag}}
+  footer: |
+    ### 📚 Documentation
+    
+    - [Getting Started](./README.md)
+    - [Configuration Examples](./examples/)
+    - [Contributing Guide](./CONTRIBUTING.md)
+    
+    ### 🐛 Issues & Support
+    
+    Report bugs and request features at: https://github.com/{{.Env.GITHUB_REPOSITORY}}/issues

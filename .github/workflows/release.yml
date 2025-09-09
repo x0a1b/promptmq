@@ -5,119 +5,31 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
-  create-release:
+  release:
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
-        body: |
-          # PromptMQ Release ${{ github.ref }}
-          
-          ## What's New
-          - Enhanced performance and stability
-          - Bug fixes and improvements
-          
-          ## Download
-          Download the appropriate binary for your platform below.
-          
-          ## Docker
-          ```bash
-          docker pull promptmq:${{ github.ref }}
-          ```
-
-  build-release:
-    needs: create-release
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
-            goarch: arm64
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.22'
-    
-    - name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
-      run: |
-        CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-        go build -ldflags "-s -w -X main.Version=${GITHUB_REF#refs/tags/}" \
-        -o promptmq-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }} \
-        ./cmd/promptmq
-    
-    - name: Compress binary (Linux)
-      if: matrix.goos == 'linux'
-      run: |
-        sudo apt-get update && sudo apt-get install -y upx
-        upx --best --lzma promptmq-${{ matrix.goos }}-${{ matrix.goarch }}
-    
-    - name: Create tar.gz
-      run: |
-        tar -czf promptmq-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz \
-        promptmq-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
-    
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./promptmq-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
-        asset_name: promptmq-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
-        asset_content_type: application/gzip
-
-  docker-release:
-    needs: create-release
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-    
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: promptmq
-        tags: |
-          type=ref,event=tag
-          type=raw,value=latest,enable={{is_default_branch}}
-    
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      
+      - name: Run tests
+        run: go test ./...
+      
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
