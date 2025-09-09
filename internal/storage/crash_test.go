@@ -76,7 +76,7 @@ func (cs *CrashSimulator) SimulateCrashAfterWrites(t *testing.T, messageCount in
 				ClientID:  "crash-test-client",
 				Timestamp: time.Now(),
 			}
-			
+
 			err := manager1.persistMessage(msg)
 			require.NoError(t, err)
 			writtenMessages[i] = msg
@@ -109,7 +109,7 @@ func (cs *CrashSimulator) SimulateCrashAfterWrites(t *testing.T, messageCount in
 
 		// Phase 3: Verify recovery
 		stats := manager2.GetStats()
-		
+
 		t.Logf("Recovery completed in %v", recoveryDuration)
 		t.Logf("Recovery stats: %+v", stats)
 
@@ -210,7 +210,7 @@ func TestAtomicBatchWrites(t *testing.T) {
 			ClientID:  "batch-client",
 			Timestamp: time.Now(),
 		}
-		
+
 		err := manager.persistMessage(msg)
 		require.NoError(t, err)
 		batchMessages[i] = msg
@@ -264,7 +264,7 @@ func TestWALConsistencyAfterCrash(t *testing.T) {
 				ClientID:  "consistency-client",
 				Timestamp: time.Now(),
 			}
-			
+
 			err := manager1.persistMessage(msg)
 			require.NoError(t, err)
 		}
@@ -283,7 +283,7 @@ func TestWALConsistencyAfterCrash(t *testing.T) {
 
 	// Verify WAL structure is consistent
 	stats := manager2.GetStats()
-	
+
 	assert.Equal(t, uint64(len(topics)*messagesPerTopic), stats["total_messages"], "All messages should be recovered with immediate sync")
 	assert.Equal(t, len(topics), stats["topic_count"], "All topics should be recovered")
 
@@ -320,7 +320,7 @@ func TestPartialWriteRecovery(t *testing.T) {
 			ClientID:  "partial-client",
 			Timestamp: time.Now(),
 		}
-		
+
 		err := manager.persistMessage(msg)
 		require.NoError(t, err)
 	}
@@ -343,7 +343,7 @@ func TestPartialWriteRecovery(t *testing.T) {
 	// Verify valid messages were recovered
 	stats := manager2.GetStats()
 	recoveredCount := stats["total_messages"].(uint64)
-	
+
 	assert.Greater(t, recoveredCount, uint64(0), "Should recover some valid messages")
 	assert.LessOrEqual(t, recoveredCount, uint64(20), "Should not recover more messages than written")
 
@@ -448,8 +448,8 @@ func TestConcurrentWriteCrashRecovery(t *testing.T) {
 	recoveredMessages := stats["total_messages"].(uint64)
 
 	// With immediate sync, we should recover a significant portion
-	expectedMinimum := uint64(float64(numWorkers * messagesPerWorker) * 0.5) // At least 50%
-	assert.GreaterOrEqual(t, recoveredMessages, expectedMinimum, 
+	expectedMinimum := uint64(float64(numWorkers*messagesPerWorker) * 0.5) // At least 50%
+	assert.GreaterOrEqual(t, recoveredMessages, expectedMinimum,
 		"Should recover at least 50%% of messages from concurrent writes")
 
 	// Verify system functionality after concurrent crash recovery
@@ -470,7 +470,7 @@ func TestConcurrentWriteCrashRecovery(t *testing.T) {
 func TestCompactionCrashSafety(t *testing.T) {
 	cfg := createCrashTestConfig(t)
 	cfg.Storage.WAL.SyncMode = "immediate"
-	
+
 	// Enable compaction for this test
 	cfg.Storage.Compaction.MaxWALSize = 1024 // Small size to trigger compaction
 	cfg.Storage.Compaction.CheckInterval = 10 * time.Millisecond
@@ -494,7 +494,7 @@ func TestCompactionCrashSafety(t *testing.T) {
 			ClientID:  "compaction-client",
 			Timestamp: time.Now(),
 		}
-		
+
 		err := manager.persistMessage(msg)
 		require.NoError(t, err)
 	}
@@ -567,7 +567,7 @@ func TestCorruptionHandling(t *testing.T) {
 			ClientID:  "corruption-client",
 			Timestamp: time.Now(),
 		}
-		
+
 		err := manager.persistMessage(msg)
 		require.NoError(t, err)
 	}
@@ -668,9 +668,9 @@ func TestZeroDataLossGuarantee(t *testing.T) {
 // TestCrashRecoveryPerformance benchmarks recovery time for various scenarios
 func TestCrashRecoveryPerformance(t *testing.T) {
 	testCases := []struct {
-		name         string
-		messageCount int
-		syncMode     string
+		name            string
+		messageCount    int
+		syncMode        string
 		maxRecoveryTime time.Duration
 	}{
 		{"Small_Immediate", 100, "immediate", 100 * time.Millisecond},
@@ -705,7 +705,7 @@ func TestCrashRecoveryPerformance(t *testing.T) {
 					ClientID:  "perf-client",
 					Timestamp: time.Now(),
 				}
-				
+
 				err := manager1.persistMessage(msg)
 				require.NoError(t, err)
 			}
@@ -750,7 +750,7 @@ func createCrashTestConfig(t *testing.T) *config.Config {
 	baseDir := t.TempDir()
 	// Add more uniqueness to avoid conflicts
 	unique := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
-	
+
 	cfg := &config.Config{
 		Storage: config.StorageConfig{
 			DataDir:         filepath.Join(baseDir, unique, "data"),
@@ -768,13 +768,13 @@ func createCrashTestConfig(t *testing.T) *config.Config {
 			Compaction: config.CompactionConfig{
 				MaxMessageAge:     24 * time.Hour,
 				MaxWALSize:        10 * 1024 * 1024, // 10MB
-				CheckInterval:     1 * time.Hour,     // Disable for most tests
+				CheckInterval:     1 * time.Hour,    // Disable for most tests
 				ConcurrentWorkers: 1,
 				BatchSize:         100,
 			},
 		},
 	}
-	
+
 	return cfg
 }
 

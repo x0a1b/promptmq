@@ -673,12 +673,12 @@ func BenchmarkPersistMessage(b *testing.B) {
 func BenchmarkCompactionOverhead(b *testing.B) {
 	cfg := createTestConfigBench()
 	cfg.Storage.WALNoSync = true
-	
+
 	// Baseline: No compaction
 	cfg.Storage.Compaction.MaxMessageAge = 24 * time.Hour
 	cfg.Storage.Compaction.MaxWALSize = 1024 * 1024 * 1024 // 1GB
 	cfg.Storage.Compaction.CheckInterval = time.Hour
-	
+
 	logger := createTestLogger()
 
 	b.Run("NoCompaction", func(b *testing.B) {
@@ -748,7 +748,7 @@ func BenchmarkCompactionOverhead(b *testing.B) {
 				i++
 			}
 		})
-		
+
 		// Report compaction effectiveness
 		stats := manager.compaction.GetCompactionStats()
 		b.Logf("Compaction stats: %+v", stats)

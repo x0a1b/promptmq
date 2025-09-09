@@ -74,7 +74,7 @@ type Manager struct {
 	messageID     atomic.Uint64
 	totalMessages atomic.Uint64
 	totalBytes    atomic.Uint64
-	metrics       StorageMetrics // For WAL performance metrics
+	metrics       StorageMetrics     // For WAL performance metrics
 	compaction    *CompactionManager // WAL compaction manager
 }
 
@@ -265,7 +265,7 @@ func (m *Manager) getOrCreateTopicWAL(topic string) (*TopicWAL, error) {
 
 	syncMode := m.getSyncMode()
 	batchSize := int64(m.cfg.Storage.WAL.BatchSyncSize)
-	
+
 	walInstance, err := NewWALWithMode(walPath, syncMode, batchSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create WAL for topic %s: %w", topic, err)
@@ -580,7 +580,7 @@ func (m *Manager) recover() error {
 func (m *Manager) recoverTopicWAL(topic, walFile string) error {
 	syncMode := m.getSyncMode()
 	batchSize := int64(m.cfg.Storage.WAL.BatchSyncSize)
-	
+
 	walInstance, err := NewWALWithMode(walFile, syncMode, batchSize)
 	if err != nil {
 		return fmt.Errorf("failed to open WAL file %s: %w", walFile, err)
@@ -840,14 +840,14 @@ func (m *Manager) GetStats() map[string]interface{} {
 	topicCount := 0
 	var totalWALSize uint64
 	walStats := make(map[string]interface{})
-	
+
 	m.topicWALs.Range(func(key, value interface{}) bool {
 		topicCount++
 		topicWAL := value.(*TopicWAL)
 		if size, err := topicWAL.wal.Size(); err == nil {
 			totalWALSize += size
 		}
-		
+
 		// Collect WAL stats for the first few topics (avoid too much data)
 		if topicCount <= 5 {
 			walStats[key.(string)] = topicWAL.wal.Stats()

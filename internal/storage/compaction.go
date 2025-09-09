@@ -14,40 +14,40 @@ import (
 
 // CompactionManager handles WAL file compaction with priority-based scheduling
 type CompactionManager struct {
-	cfg              *config.Config
-	logger           zerolog.Logger
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	metrics          StorageMetrics
-	storage          *Manager
-	
+	cfg     *config.Config
+	logger  zerolog.Logger
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	metrics StorageMetrics
+	storage *Manager
+
 	// Priority queues for compaction candidates
-	criticalQueue    chan string // Size-exceeded topics (priority)
-	normalQueue      chan string // Age-exceeded topics
-	
+	criticalQueue chan string // Size-exceeded topics (priority)
+	normalQueue   chan string // Age-exceeded topics
+
 	// Worker management
-	activeWorkers    int
-	workerMu         sync.RWMutex
-	
+	activeWorkers int
+	workerMu      sync.RWMutex
+
 	// Compaction metrics
-	totalCompactions   uint64
-	totalSpaceReclaimed uint64
+	totalCompactions     uint64
+	totalSpaceReclaimed  uint64
 	totalMessagesRemoved uint64
-	
+
 	// Shutdown management
-	stopOnce sync.Once
-	compactionDuration  time.Duration
+	stopOnce           sync.Once
+	compactionDuration time.Duration
 	mu                 sync.RWMutex
 }
 
 // CompactionCandidate represents a WAL file that needs compaction
 type CompactionCandidate struct {
-	Topic        string
-	WalPath      string
-	CurrentSize  uint64
+	Topic         string
+	WalPath       string
+	CurrentSize   uint64
 	OldestMessage time.Time
-	Priority     CompactionPriority
+	Priority      CompactionPriority
 }
 
 // CompactionPriority defines compaction urgency levels
@@ -61,7 +61,7 @@ const (
 // NewCompactionManager creates a new compaction manager
 func NewCompactionManager(cfg *config.Config, logger zerolog.Logger, storage *Manager, metrics StorageMetrics) *CompactionManager {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	return &CompactionManager{
 		cfg:           cfg,
 		logger:        logger.With().Str("component", "compaction").Logger(),
@@ -101,41 +101,39 @@ func (cm *CompactionManager) Stop() error {
 	var err error
 	cm.stopOnce.Do(func() {
 		cm.logger.Info().Msg("Stopping WAL compaction manager")
-		
+
 		cm.cancel()
 		cm.wg.Wait()
-		
+
 		// Close channels safely
 		close(cm.criticalQueue)
 		close(cm.normalQueue)
+		// Log final statistics
+		cm.logger.Info().
+			Uint64("total_compactions", cm.totalCompactions).
+			Uint64("space_reclaimed_mb", cm.totalSpaceReclaimed/1024/1024).
+			Uint64("messages_removed", cm.totalMessagesRemoved).
+			Dur("total_compaction_time", cm.compactionDuration).
+			Msg("Compaction manager stopped")
 	})
 	return err
-	
-	cm.logger.Info().
-		Uint64("total_compactions", cm.totalCompactions).
-		Uint64("space_reclaimed_mb", cm.totalSpaceReclaimed/1024/1024).
-		Uint64("messages_removed", cm.totalMessagesRemoved).
-		Dur("total_compaction_time", cm.compactionDuration).
-		Msg("Compaction manager stopped")
-	
-	return nil
 }
 
 // scanLoop periodically scans for WAL files needing compaction
 func (cm *CompactionManager) scanLoop() {
 	defer cm.wg.Done()
-	
+
 	interval := cm.cfg.Storage.Compaction.CheckInterval
 	if interval <= 0 {
 		interval = 5 * time.Minute // Default fallback
 	}
-	
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	
+
 	// Run initial scan
 	cm.scanForCandidates()
-	
+
 	for {
 		select {
 		case <-cm.ctx.Done():
@@ -149,26 +147,26 @@ func (cm *CompactionManager) scanLoop() {
 // scanForCandidates identifies WAL files needing compaction
 func (cm *CompactionManager) scanForCandidates() {
 	cm.logger.Debug().Msg("Scanning for compaction candidates")
-	
+
 	candidates := []CompactionCandidate{}
 	now := time.Now()
-	
+
 	// Scan all active topic WALs
 	cm.storage.topicWALs.Range(func(key, value interface{}) bool {
 		topic := key.(string)
 		topicWAL := value.(*TopicWAL)
-		
+
 		candidate, needsCompaction := cm.evaluateTopic(topic, topicWAL, now)
 		if needsCompaction {
 			candidates = append(candidates, candidate)
 		}
-		
+
 		return true
 	})
-	
+
 	// Queue candidates by priority
 	cm.queueCandidates(candidates)
-	
+
 	if len(candidates) > 0 {
 		cm.logger.Info().
 			Int("candidates", len(candidates)).
@@ -182,7 +180,7 @@ func (cm *CompactionManager) evaluateTopic(topic string, topicWAL *TopicWAL, now
 		Topic:   topic,
 		WalPath: topicWAL.wal.path,
 	}
-	
+
 	// Get WAL file size
 	size, err := topicWAL.wal.Size()
 	if err != nil {
@@ -190,7 +188,7 @@ func (cm *CompactionManager) evaluateTopic(topic string, topicWAL *TopicWAL, now
 		return candidate, false
 	}
 	candidate.CurrentSize = size
-	
+
 	// Check size threshold (critical priority)
 	if size > cm.cfg.Storage.Compaction.MaxWALSize {
 		candidate.Priority = CriticalPriority
@@ -201,7 +199,7 @@ func (cm *CompactionManager) evaluateTopic(topic string, topicWAL *TopicWAL, now
 			Msg("Topic WAL exceeds size threshold")
 		return candidate, true
 	}
-	
+
 	// Check age threshold (normal priority)
 	oldestMessage := cm.getOldestMessageTime(topicWAL)
 	if !oldestMessage.IsZero() && now.Sub(oldestMessage) > cm.cfg.Storage.Compaction.MaxMessageAge {
@@ -215,7 +213,7 @@ func (cm *CompactionManager) evaluateTopic(topic string, topicWAL *TopicWAL, now
 			Msg("Topic WAL exceeds age threshold")
 		return candidate, true
 	}
-	
+
 	return candidate, false
 }
 
@@ -226,18 +224,18 @@ func (cm *CompactionManager) getOldestMessageTime(topicWAL *TopicWAL) time.Time 
 		return time.Time{}
 	}
 	defer reader.Close()
-	
+
 	// Read first message to get oldest timestamp
 	_, data, err := reader.Next()
 	if err != nil {
 		return time.Time{}
 	}
-	
+
 	msg, err := cm.storage.deserializeMessage(data)
 	if err != nil {
 		return time.Time{}
 	}
-	
+
 	return msg.Timestamp
 }
 
@@ -270,18 +268,18 @@ func (cm *CompactionManager) queueCandidates(candidates []CompactionCandidate) {
 // worker is a compaction worker that processes topics from priority queues
 func (cm *CompactionManager) worker(workerID int) {
 	defer cm.wg.Done()
-	
+
 	cm.logger.Debug().Int("worker_id", workerID).Msg("Starting compaction worker")
-	
+
 	for {
 		select {
 		case <-cm.ctx.Done():
 			return
-			
+
 		// Process critical queue first (priority)
 		case topic := <-cm.criticalQueue:
 			cm.compactTopic(workerID, topic, CriticalPriority)
-			
+
 		// Process normal queue if no critical work
 		case topic := <-cm.normalQueue:
 			cm.compactTopic(workerID, topic, NormalPriority)
@@ -297,12 +295,12 @@ func (cm *CompactionManager) compactTopic(workerID int, topic string, priority C
 		Str("topic", topic).
 		Str("priority", cm.priorityString(priority)).
 		Logger()
-	
+
 	logger.Info().Msg("Starting WAL compaction")
-	
+
 	cm.updateActiveWorkers(1)
 	defer cm.updateActiveWorkers(-1)
-	
+
 	// Get topic WAL
 	topicWALInterface, exists := cm.storage.topicWALs.Load(topic)
 	if !exists {
@@ -310,19 +308,19 @@ func (cm *CompactionManager) compactTopic(workerID int, topic string, priority C
 		return
 	}
 	topicWAL := topicWALInterface.(*TopicWAL)
-	
+
 	// Perform atomic compaction
 	messagesRemoved, spaceReclaimed, err := cm.performCompaction(topicWAL, logger)
 	duration := time.Since(startTime)
-	
+
 	if err != nil {
 		logger.Error().Err(err).Dur("duration", duration).Msg("WAL compaction failed")
 		return
 	}
-	
+
 	// Update metrics
 	cm.updateCompactionMetrics(messagesRemoved, spaceReclaimed, duration)
-	
+
 	logger.Info().
 		Uint64("messages_removed", messagesRemoved).
 		Uint64("space_reclaimed_mb", spaceReclaimed/1024/1024).
@@ -335,11 +333,11 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 	// Acquire write lock for this topic WAL to ensure safety
 	topicWAL.mu.Lock()
 	defer topicWAL.mu.Unlock()
-	
+
 	originalPath := topicWAL.wal.path
 	tempPath := originalPath + ".compact"
 	cutoffTime := time.Now().Add(-cm.cfg.Storage.Compaction.MaxMessageAge)
-	
+
 	// Create temporary compacted WAL file
 	tempWAL, err := NewWAL(tempPath)
 	if err != nil {
@@ -349,19 +347,19 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 		tempWAL.Close()
 		os.Remove(tempPath) // Clean up on any error
 	}()
-	
+
 	// Read from original WAL and write valid messages to temp WAL
 	reader := topicWAL.wal.NewReader()
 	if reader == nil {
 		return 0, 0, fmt.Errorf("failed to create WAL reader")
 	}
 	defer reader.Close()
-	
+
 	var messagesProcessed, messagesRemoved, messagesRetained uint64
 	originalSize, _ := topicWAL.wal.Size()
-	
+
 	batchWriter := tempWAL.NewBatchWriter(cm.cfg.Storage.Compaction.BatchSize)
-	
+
 	for {
 		_, data, err := reader.Next()
 		if err != nil {
@@ -370,9 +368,9 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 			}
 			return 0, 0, fmt.Errorf("failed to read WAL entry: %w", err)
 		}
-		
+
 		messagesProcessed++
-		
+
 		// Deserialize to check timestamp
 		msg, err := cm.storage.deserializeMessage(data)
 		if err != nil {
@@ -380,7 +378,7 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 			messagesRemoved++
 			continue
 		}
-		
+
 		// Keep message if it's newer than cutoff time
 		if msg.Timestamp.After(cutoffTime) {
 			if err := batchWriter.Add(data); err != nil {
@@ -390,7 +388,7 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 		} else {
 			messagesRemoved++
 		}
-		
+
 		// Flush batch periodically for memory efficiency
 		if messagesProcessed%uint64(cm.cfg.Storage.Compaction.BatchSize) == 0 {
 			if err := batchWriter.Flush(); err != nil {
@@ -398,44 +396,44 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 			}
 		}
 	}
-	
+
 	// Final flush
 	if err := batchWriter.Flush(); err != nil {
 		return 0, 0, fmt.Errorf("failed to final flush: %w", err)
 	}
-	
+
 	// Sync temp WAL to disk
 	if err := tempWAL.Sync(); err != nil {
 		return 0, 0, fmt.Errorf("failed to sync temp WAL: %w", err)
 	}
-	
+
 	// Close temp WAL before file operations
 	if err := tempWAL.Close(); err != nil {
 		return 0, 0, fmt.Errorf("failed to close temp WAL: %w", err)
 	}
-	
+
 	// Close original WAL
 	if err := topicWAL.wal.Close(); err != nil {
 		logger.Warn().Err(err).Msg("Failed to close original WAL")
 	}
-	
+
 	// Atomic file replacement
 	if err := os.Rename(tempPath, originalPath); err != nil {
 		// Try to reopen original WAL on rename failure
 		topicWAL.wal, _ = NewWAL(originalPath)
 		return 0, 0, fmt.Errorf("failed to replace WAL file: %w", err)
 	}
-	
+
 	// Reopen the compacted WAL file
 	newWAL, err := NewWAL(originalPath)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to reopen compacted WAL: %w", err)
 	}
 	topicWAL.wal = newWAL
-	
+
 	newSize, _ := topicWAL.wal.Size()
 	spaceReclaimed := originalSize - newSize
-	
+
 	logger.Debug().
 		Uint64("messages_processed", messagesProcessed).
 		Uint64("messages_retained", messagesRetained).
@@ -444,7 +442,7 @@ func (cm *CompactionManager) performCompaction(topicWAL *TopicWAL, logger zerolo
 		Uint64("new_size_mb", newSize/1024/1024).
 		Uint64("space_reclaimed_mb", spaceReclaimed/1024/1024).
 		Msg("Compaction statistics")
-	
+
 	return messagesRemoved, spaceReclaimed, nil
 }
 
@@ -482,14 +480,14 @@ func (cm *CompactionManager) GetCompactionStats() map[string]interface{} {
 	cm.workerMu.RLock()
 	defer cm.mu.RUnlock()
 	defer cm.workerMu.RUnlock()
-	
+
 	return map[string]interface{}{
-		"total_compactions":      cm.totalCompactions,
-		"messages_removed":       cm.totalMessagesRemoved,
-		"space_reclaimed_bytes":  cm.totalSpaceReclaimed,
-		"total_duration_ms":      cm.compactionDuration.Milliseconds(),
-		"active_workers":         cm.activeWorkers,
-		"critical_queue_depth":   len(cm.criticalQueue),
-		"normal_queue_depth":     len(cm.normalQueue),
+		"total_compactions":     cm.totalCompactions,
+		"messages_removed":      cm.totalMessagesRemoved,
+		"space_reclaimed_bytes": cm.totalSpaceReclaimed,
+		"total_duration_ms":     cm.compactionDuration.Milliseconds(),
+		"active_workers":        cm.activeWorkers,
+		"critical_queue_depth":  len(cm.criticalQueue),
+		"normal_queue_depth":    len(cm.normalQueue),
 	}
 }
