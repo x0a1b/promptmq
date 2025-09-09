@@ -49,11 +49,20 @@ type MQTTConfig struct {
 }
 
 type StorageConfig struct {
-	DataDir         string        `mapstructure:"data-dir"`
-	WALDir          string        `mapstructure:"wal-dir"`
-	MemoryBuffer    uint64        `mapstructure:"memory-buffer"`
-	WALSyncInterval time.Duration `mapstructure:"wal-sync-interval"`
-	WALNoSync       bool          `mapstructure:"wal-no-sync"`
+	DataDir         string              `mapstructure:"data-dir"`
+	WALDir          string              `mapstructure:"wal-dir"`
+	MemoryBuffer    uint64              `mapstructure:"memory-buffer"`
+	WALSyncInterval time.Duration       `mapstructure:"wal-sync-interval"`
+	WALNoSync       bool                `mapstructure:"wal-no-sync"`
+	Compaction      CompactionConfig    `mapstructure:"compaction"`
+}
+
+type CompactionConfig struct {
+	MaxMessageAge        time.Duration `mapstructure:"max-message-age"`
+	MaxWALSize          uint64        `mapstructure:"max-wal-size"`
+	CheckInterval       time.Duration `mapstructure:"check-interval"`
+	ConcurrentWorkers   int           `mapstructure:"concurrent-workers"`
+	BatchSize           int           `mapstructure:"batch-size"`
 }
 
 type ClusterConfig struct {
@@ -121,6 +130,13 @@ func setDefaults() {
 	viper.SetDefault("storage.memory-buffer", 268435456) // 256MB
 	viper.SetDefault("storage.wal-sync-interval", "100ms")
 	viper.SetDefault("storage.wal-no-sync", false)
+	
+	// Compaction defaults
+	viper.SetDefault("storage.compaction.max-message-age", "2h")
+	viper.SetDefault("storage.compaction.max-wal-size", 104857600) // 100MB
+	viper.SetDefault("storage.compaction.check-interval", "5m")
+	viper.SetDefault("storage.compaction.concurrent-workers", 2)
+	viper.SetDefault("storage.compaction.batch-size", 1000)
 
 	// Cluster defaults
 	viper.SetDefault("cluster.enabled", false)

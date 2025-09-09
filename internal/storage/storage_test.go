@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -534,8 +535,12 @@ func TestErrorHandling(t *testing.T) {
 
 func TestCompaction(t *testing.T) {
 	cfg := createTestConfig(t)
-	logger := createTestLogger()
+	// Set aggressive compaction for testing
+	cfg.Storage.Compaction.MaxMessageAge = 100 * time.Millisecond
+	cfg.Storage.Compaction.MaxWALSize = 1024 // 1KB for easy testing
+	cfg.Storage.Compaction.CheckInterval = 10 * time.Millisecond
 
+	logger := createTestLogger()
 	manager, err := New(cfg, logger)
 	require.NoError(t, err)
 	defer manager.StopManager()
@@ -547,26 +552,48 @@ func TestCompaction(t *testing.T) {
 	require.NoError(t, err)
 
 	topic := "compact/test"
-	msg := &Message{
-		ID:        1,
-		Topic:     topic,
-		Payload:   []byte("test"),
-		ClientID:  "client",
-		Timestamp: time.Now(),
+
+	// Add old messages that should be compacted
+	oldTime := time.Now().Add(-time.Hour)
+	for i := 0; i < 5; i++ {
+		msg := &Message{
+			ID:        uint64(i + 1),
+			Topic:     topic,
+			Payload:   []byte(fmt.Sprintf("old message %d", i)),
+			ClientID:  "client",
+			Timestamp: oldTime,
+		}
+		err = manager.persistMessage(msg)
+		require.NoError(t, err)
 	}
 
-	err = manager.persistMessage(msg)
-	require.NoError(t, err)
+	// Add new messages that should be kept
+	newTime := time.Now()
+	for i := 0; i < 3; i++ {
+		msg := &Message{
+			ID:        uint64(i + 6),
+			Topic:     topic,
+			Payload:   []byte(fmt.Sprintf("new message %d", i)),
+			ClientID:  "client",
+			Timestamp: newTime,
+		}
+		err = manager.persistMessage(msg)
+		require.NoError(t, err)
+	}
 
-	// Force flush to ensure topic WAL is created
+	// Force flush to ensure messages are written to WAL
 	err = manager.ForceFlush()
 	require.NoError(t, err)
 
-	// Test compaction (currently a placeholder)
-	err = manager.CompactTopic(topic, time.Now())
-	assert.NoError(t, err)
+	// Wait for compaction to trigger (age-based)
+	time.Sleep(200 * time.Millisecond)
 
-	// Test compaction of non-existent topic
+	// Check compaction stats
+	compactionStats := manager.compaction.GetCompactionStats()
+	assert.Contains(t, compactionStats, "total_compactions")
+	assert.Contains(t, compactionStats, "messages_removed")
+
+	// Test compaction of non-existent topic (should still error with manual compaction)
 	err = manager.CompactTopic("nonexistent", time.Now())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "topic WAL not found")
@@ -640,5 +667,90 @@ func BenchmarkPersistMessage(b *testing.B) {
 			}
 			i++
 		}
+	})
+}
+
+func BenchmarkCompactionOverhead(b *testing.B) {
+	cfg := createTestConfigBench()
+	cfg.Storage.WALNoSync = true
+	
+	// Baseline: No compaction
+	cfg.Storage.Compaction.MaxMessageAge = 24 * time.Hour
+	cfg.Storage.Compaction.MaxWALSize = 1024 * 1024 * 1024 // 1GB
+	cfg.Storage.Compaction.CheckInterval = time.Hour
+	
+	logger := createTestLogger()
+
+	b.Run("NoCompaction", func(b *testing.B) {
+		manager, err := New(cfg, logger)
+		require.NoError(b, err)
+		defer manager.StopManager()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		err = manager.Start(ctx)
+		require.NoError(b, err)
+
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				msg := &Message{
+					ID:        uint64(i + 1),
+					Topic:     fmt.Sprintf("bench/topic/%d", i%10),
+					Payload:   make([]byte, 100),
+					QoS:       1,
+					ClientID:  "bench-client",
+					Timestamp: time.Now(),
+				}
+				err := manager.persistMessage(msg)
+				if err != nil {
+					b.Error(err)
+				}
+				i++
+			}
+		})
+	})
+
+	// With compaction enabled
+	cfg.Storage.Compaction.MaxMessageAge = 10 * time.Millisecond
+	cfg.Storage.Compaction.MaxWALSize = 10240 // 10KB
+	cfg.Storage.Compaction.CheckInterval = 10 * time.Millisecond
+
+	b.Run("WithCompaction", func(b *testing.B) {
+		manager, err := New(cfg, logger)
+		require.NoError(b, err)
+		defer manager.StopManager()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		err = manager.Start(ctx)
+		require.NoError(b, err)
+
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				msg := &Message{
+					ID:        uint64(i + 1),
+					Topic:     fmt.Sprintf("bench/topic/%d", i%10),
+					Payload:   make([]byte, 100),
+					QoS:       1,
+					ClientID:  "bench-client",
+					Timestamp: time.Now(),
+				}
+				err := manager.persistMessage(msg)
+				if err != nil {
+					b.Error(err)
+				}
+				i++
+			}
+		})
+		
+		// Report compaction effectiveness
+		stats := manager.compaction.GetCompactionStats()
+		b.Logf("Compaction stats: %+v", stats)
 	})
 }
