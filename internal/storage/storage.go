@@ -260,12 +260,22 @@ func (m *Manager) getOrCreateTopicWAL(topic string) (*TopicWAL, error) {
 		return topicWAL.(*TopicWAL), nil
 	}
 
-	// Create new WAL for this topic
+	// Create new WAL for this topic with configured sync mode
 	walPath := filepath.Join(m.cfg.Storage.WALDir, sanitizeTopicName(topic)+".wal")
 
-	walInstance, err := NewWAL(walPath)
+	syncMode := m.getSyncMode()
+	batchSize := int64(m.cfg.Storage.WAL.BatchSyncSize)
+	
+	walInstance, err := NewWALWithMode(walPath, syncMode, batchSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create WAL for topic %s: %w", topic, err)
+	}
+
+	// Configure sync behavior based on config
+	if m.cfg.Storage.WAL.ForceFsync {
+		walInstance.SetNoSync(false) // Force fsync enabled
+	} else {
+		walInstance.SetNoSync(m.cfg.Storage.WALNoSync) // Use legacy setting
 	}
 
 	topicWAL := &TopicWAL{
@@ -568,9 +578,19 @@ func (m *Manager) recover() error {
 
 // recoverTopicWAL recovers messages from a specific topic WAL file
 func (m *Manager) recoverTopicWAL(topic, walFile string) error {
-	walInstance, err := NewWAL(walFile)
+	syncMode := m.getSyncMode()
+	batchSize := int64(m.cfg.Storage.WAL.BatchSyncSize)
+	
+	walInstance, err := NewWALWithMode(walFile, syncMode, batchSize)
 	if err != nil {
 		return fmt.Errorf("failed to open WAL file %s: %w", walFile, err)
+	}
+
+	// Configure sync behavior for recovery
+	if m.cfg.Storage.WAL.ForceFsync {
+		walInstance.SetNoSync(false) // Force fsync enabled
+	} else {
+		walInstance.SetNoSync(m.cfg.Storage.WALNoSync) // Use legacy setting
 	}
 
 	topicWAL := &TopicWAL{
@@ -628,6 +648,20 @@ func (m *Manager) recoverTopicWAL(topic, walFile string) error {
 		Msg("Recovered topic WAL")
 
 	return nil
+}
+
+// getSyncMode converts config string to SyncMode enum
+func (m *Manager) getSyncMode() SyncMode {
+	switch m.cfg.Storage.WAL.SyncMode {
+	case "immediate":
+		return SyncImmediate
+	case "batch":
+		return SyncBatch
+	case "periodic":
+		fallthrough
+	default:
+		return SyncPeriodic
+	}
 }
 
 // sanitizeTopicName converts MQTT topic to safe filename
@@ -804,8 +838,20 @@ func (m *Manager) GetMessagesByTopic(topic string, limit int) ([]*Message, error
 // GetStats returns storage statistics
 func (m *Manager) GetStats() map[string]interface{} {
 	topicCount := 0
+	var totalWALSize uint64
+	walStats := make(map[string]interface{})
+	
 	m.topicWALs.Range(func(key, value interface{}) bool {
 		topicCount++
+		topicWAL := value.(*TopicWAL)
+		if size, err := topicWAL.wal.Size(); err == nil {
+			totalWALSize += size
+		}
+		
+		// Collect WAL stats for the first few topics (avoid too much data)
+		if topicCount <= 5 {
+			walStats[key.(string)] = topicWAL.wal.Stats()
+		}
 		return true
 	})
 
@@ -816,6 +862,11 @@ func (m *Manager) GetStats() map[string]interface{} {
 		"memory_buffer_size":  m.memBuffer.Size(),
 		"memory_buffer_count": m.memBuffer.Count(),
 		"next_message_id":     m.messageID.Load() + 1,
+		"total_wal_size":      totalWALSize,
+		"sync_mode":           m.cfg.Storage.WAL.SyncMode,
+		"force_fsync":         m.cfg.Storage.WAL.ForceFsync,
+		"crash_recovery":      m.cfg.Storage.WAL.CrashRecoveryValidation,
+		"wal_stats_sample":    walStats, // Sample of WAL statistics
 	}
 
 	// Add compaction statistics
