@@ -123,14 +123,18 @@ benchmark() {
 lint() {
     print_step "Running linters..."
     
-    # Check if golangci-lint is installed
-    if ! command -v golangci-lint &> /dev/null; then
-        print_step "Installing golangci-lint..."
-        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-    fi
+    # Force reinstall golangci-lint to ensure compatibility with current Go version
+    print_step "Installing/updating golangci-lint..."
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
     
-    golangci-lint run
-    print_success "Linting completed"
+    # Run linting with error handling
+    if golangci-lint run; then
+        print_success "Linting completed"
+    else
+        print_error "Linting failed - some issues found"
+        echo "Note: You can run 'golangci-lint run --fix' to auto-fix some issues"
+        exit 1
+    fi
 }
 
 # Build binary
