@@ -803,17 +803,39 @@ func (m *Manager) OnACLCheck(cl *mqtt.Client, topic string, write bool) bool {
 
 // GetMessagesByTopic retrieves messages for a specific topic from WAL
 func (m *Manager) GetMessagesByTopic(topic string, limit int) ([]*Message, error) {
+	messages := make([]*Message, 0, limit)
+	
+	// First, get messages from memory buffer for this topic
+	m.memBuffer.mu.RLock()
+	for _, msg := range m.memBuffer.messages {
+		if msg.Topic == topic && len(messages) < limit {
+			messages = append(messages, msg)
+		}
+	}
+	m.memBuffer.mu.RUnlock()
+	
+	// If we have enough messages from buffer, return them
+	if len(messages) >= limit {
+		return messages[:limit], nil
+	}
+	
+	// Otherwise, also read from WAL
 	topicWAL, exists := m.topicWALs.Load(topic)
 	if !exists {
-		return []*Message{}, nil
+		return messages, nil
 	}
 
 	wal := topicWAL.(*TopicWAL)
 	reader := wal.wal.NewReader()
-	messages := make([]*Message, 0, limit)
+	if reader == nil {
+		return messages, nil
+	}
+	defer reader.Close()
+	
+	remainingLimit := limit - len(messages)
 	count := 0
 
-	for count < limit {
+	for count < remainingLimit {
 		_, data, err := reader.Next()
 		if err != nil {
 			if err.Error() == "EOF" || err.Error() == "no more entries" {
@@ -837,28 +859,37 @@ func (m *Manager) GetMessagesByTopic(topic string, limit int) ([]*Message, error
 
 // GetStats returns storage statistics
 func (m *Manager) GetStats() map[string]interface{} {
-	topicCount := 0
+	topicSet := make(map[string]bool)
 	var totalWALSize uint64
 	walStats := make(map[string]interface{})
 
+	// Count topics from WAL files
 	m.topicWALs.Range(func(key, value interface{}) bool {
-		topicCount++
+		topic := key.(string)
+		topicSet[topic] = true
 		topicWAL := value.(*TopicWAL)
 		if size, err := topicWAL.wal.Size(); err == nil {
 			totalWALSize += size
 		}
 
 		// Collect WAL stats for the first few topics (avoid too much data)
-		if topicCount <= 5 {
-			walStats[key.(string)] = topicWAL.wal.Stats()
+		if len(topicSet) <= 5 {
+			walStats[topic] = topicWAL.wal.Stats()
 		}
 		return true
 	})
 
+	// Count unique topics from memory buffer
+	m.memBuffer.mu.RLock()
+	for _, msg := range m.memBuffer.messages {
+		topicSet[msg.Topic] = true
+	}
+	m.memBuffer.mu.RUnlock()
+
 	stats := map[string]interface{}{
 		"total_messages":      m.totalMessages.Load(),
 		"total_bytes":         m.totalBytes.Load(),
-		"topic_count":         topicCount,
+		"topic_count":         len(topicSet),
 		"memory_buffer_size":  m.memBuffer.Size(),
 		"memory_buffer_count": m.memBuffer.Count(),
 		"next_message_id":     m.messageID.Load() + 1,

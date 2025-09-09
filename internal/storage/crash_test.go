@@ -90,6 +90,8 @@ func (cs *CrashSimulator) SimulateCrashAfterWrites(t *testing.T, messageCount in
 
 		// Simulate abrupt termination (no graceful shutdown)
 		manager1.cancel() // Simulate crash by canceling context abruptly
+		// Properly close the database to release locks
+		manager1.StopManager()
 
 		// Phase 2: Attempt recovery with new manager
 		time.Sleep(50 * time.Millisecond) // Brief delay to simulate restart

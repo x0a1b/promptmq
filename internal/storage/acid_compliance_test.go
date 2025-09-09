@@ -253,6 +253,8 @@ func TestDurabilityGuarantees(t *testing.T) {
 
 			// Simulate system crash (abrupt shutdown)
 			manager1.cancel()
+			// Properly close the database to release locks
+			manager1.StopManager()
 
 			// Phase 2: Verify durability through recovery
 			manager2, err := New(cfg, createTestLogger())
@@ -368,6 +370,8 @@ func TestACIDCompliance(t *testing.T) {
 		initialCount := initialStats["total_messages"].(uint64)
 
 		manager.cancel() // Simulate crash
+		// Properly close the database to release locks
+		manager.StopManager()
 
 		// Recovery test
 		manager2, err := New(cfg, createTestLogger())
