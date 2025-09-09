@@ -1,0 +1,57 @@
+# PromptMQ High Durability Configuration
+# SQLite-like ACID guarantees for critical systems
+
+log:
+  level: "info"
+  format: "json"
+
+server:
+  bind: "0.0.0.0:1883"
+  ws-bind: "0.0.0.0:8080"
+  read-timeout: "30s"
+  write-timeout: "30s"
+
+# MQTT Protocol Settings
+mqtt:
+  max-packet-size: 65535
+  max-client-id-len: 65535
+  max-topic-len: 65535
+  max-qos: 2
+  keep-alive: 60
+  max-inflight: 20
+  max-connections: 5000        # Lower limit due to sync overhead
+  retain-available: true
+  wildcard-available: true
+  shared-sub-available: true
+
+# Storage Configuration - Maximum Durability
+storage:
+  data-dir: "./data"
+  wal-dir: "./wal"
+  memory-buffer: 1048576       # 1MB buffer for immediate flush
+  
+  # WAL Settings - SQLite-like durability
+  wal:
+    sync-mode: "immediate"     # fsync after every write
+    sync-interval: 10ms        # Not used in immediate mode
+    batch-sync-size: 1         # Not used in immediate mode
+    force-fsync: true          # Force fsync to disk
+    crash-recovery-validation: true
+    
+  # Compaction Settings - Conservative
+  compaction:
+    max-message-age: "24h"     # Longer retention for audit trails
+    max-wal-size: 52428800     # 50MB WAL files
+    check-interval: "10m"      # Less frequent compaction
+    concurrent-workers: 1      # Single worker to avoid conflicts
+    batch-size: 500
+
+# Clustering Disabled for Maximum Durability
+cluster:
+  enabled: false
+
+# Metrics & Monitoring
+metrics:
+  enabled: true
+  bind: "0.0.0.0:9090"
+  path: "/metrics"

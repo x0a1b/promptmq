@@ -1,0 +1,61 @@
+# PromptMQ High Throughput Configuration
+# Optimized for maximum messages per second
+
+log:
+  level: "warn"                # Minimal logging overhead
+  format: "json"
+
+server:
+  bind: "0.0.0.0:1883"
+  ws-bind: "0.0.0.0:8080"
+  read-buffer: 65536           # Larger buffers for high throughput
+  write-buffer: 65536
+  read-timeout: "60s"
+  write-timeout: "60s"
+
+# MQTT Protocol Settings - Optimized for throughput
+mqtt:
+  max-packet-size: 65535
+  max-client-id-len: 256       # Shorter IDs for efficiency
+  max-topic-len: 512           # Shorter topics for efficiency
+  max-qos: 1                   # QoS 1 for balance of speed and reliability
+  keep-alive: 120              # Longer keep-alive to reduce overhead
+  max-inflight: 50             # Higher in-flight for better throughput
+  max-connections: 50000       # Very high connection limit
+  retain-available: false      # Disable retain for better performance
+  wildcard-available: true
+  shared-sub-available: true
+
+# Storage Configuration - Maximum Performance
+storage:
+  data-dir: "./data"
+  wal-dir: "./wal"
+  memory-buffer: 1073741824    # 1GB buffer for maximum throughput
+  
+  # WAL Settings - Performance optimized
+  wal:
+    sync-mode: "periodic"      # Delayed sync for maximum throughput
+    sync-interval: 1s          # Longer sync intervals
+    batch-sync-size: 1000      # Not used in periodic mode
+    force-fsync: false         # Disable fsync for speed
+    crash-recovery-validation: false
+    
+  # Compaction Settings - Performance focused
+  compaction:
+    max-message-age: "1h"      # Shorter retention for less storage overhead
+    max-wal-size: 209715200    # 200MB WAL files
+    check-interval: "15m"      # Less frequent compaction
+    concurrent-workers: 4      # More workers for faster compaction
+    batch-size: 2000
+
+# Clustering for horizontal scaling
+cluster:
+  enabled: false               # Enable for multi-node scaling
+  bind: "0.0.0.0:7946"
+  peers: []
+
+# Metrics with minimal overhead
+metrics:
+  enabled: true
+  bind: "0.0.0.0:9090"
+  path: "/metrics"

@@ -1,0 +1,58 @@
+# PromptMQ Development Configuration
+# Optimized for development and testing
+
+log:
+  level: "debug"
+  format: "text"        # Human-readable format for development
+
+server:
+  bind: "127.0.0.1:1883"       # Localhost only for security
+  ws-bind: "127.0.0.1:8080"    # WebSocket on localhost
+  read-timeout: "30s"
+  write-timeout: "30s"
+  daemon: false                 # Run in foreground for development
+
+# MQTT Protocol Settings
+mqtt:
+  max-packet-size: 65535
+  max-client-id-len: 65535
+  max-topic-len: 65535
+  max-qos: 2
+  keep-alive: 60
+  max-inflight: 20
+  max-connections: 1000        # Lower limit for development
+  retain-available: true
+  wildcard-available: true
+  shared-sub-available: true
+
+# Storage Configuration
+storage:
+  data-dir: "./dev-data"       # Separate directory for dev data
+  wal-dir: "./dev-wal"
+  memory-buffer: 67108864      # 64MB buffer for development
+  
+  # WAL Settings - Balanced for development
+  wal:
+    sync-mode: "batch"         # Balanced performance for development
+    sync-interval: 100ms
+    batch-sync-size: 50
+    force-fsync: false
+    crash-recovery-validation: true
+    
+  # Compaction Settings
+  compaction:
+    max-message-age: "30m"     # Shorter retention for development
+    max-wal-size: 10485760     # 10MB for faster compaction testing
+    check-interval: "1m"       # More frequent compaction checks
+    concurrent-workers: 1
+    batch-size: 100
+
+# Clustering Disabled for Development
+cluster:
+  enabled: false
+
+# Metrics & Monitoring
+metrics:
+  enabled: true
+  bind: "127.0.0.1:9090"       # Localhost only
+  path: "/metrics"

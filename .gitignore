@@ -13,18 +13,33 @@ promptmq.exe
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Dependency directories
+vendor/
 
 # Go workspace file
 go.work
 
-# IDE and editor files
-.vscode/
-.idea/
+# Build artifacts
+bin/
+build/
+dist/
+tmp/
+
+# Data directories
+data/
+wal/
+dev-data/
+dev-wal/
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
 *.swp
-*.swo
 *~
+.#*
 
 # OS generated files
 .DS_Store
@@ -35,34 +50,33 @@ go.work
 ehthumbs.db
 Thumbs.db
 
-# PromptMQ specific
-# Data directories
-data/
-wal/
-logs/
-*.log
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
 
-# Test artifacts
-test_data/
-test_wal/
-coverage.out
+# Test coverage
+coverage/
 coverage.html
+coverage.out
+profile.out
 
-# Configuration files (keep examples)
-# Ignore actual config files but keep examples
-config.yaml
-config.json
-*.local.yaml
-*.local.json
+# Air live reload
+tmp/
+build-errors.log
+
+# Configuration overrides
+config.local.yaml
+config.local.yml
+.promptmq.yaml
+.promptmq.yml
 
 # Runtime files
 *.pid
 *.sock
-
-# Temporary files
-tmp/
-temp/
-*.tmp
 
 # Backup files
 *.bak
@@ -72,29 +86,26 @@ temp/
 *.db
 *.badger
 
-# Certificates and keys (if any)
+# Development certificates
 *.pem
 *.key
 *.crt
-*.p12
+cert/
+certs/
+
+# Package files
+*.tar.gz
+*.zip
 
 # Profiling files
 *.prof
 *.trace
 
-# Benchmark results
-*.bench
-
-# Docker
-Dockerfile.local
-docker-compose.override.yml
-
-# Build artifacts
-dist/
-build/
-bin/
-
 # Environment files
 .env
 .env.local
 .env.*.local
+
+# Docker overrides
+Dockerfile.local
+docker-compose.override.yml
