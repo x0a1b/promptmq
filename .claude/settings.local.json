@@ -4,7 +4,8 @@
       "WebSearch",
       "Bash(timeout:*)",
       "Bash(sed:*)",
-      "Bash(GOOS=linux GOARCH=amd64 go build -o promptmq-linux-amd64 main.go)"
+      "Bash(GOOS=linux GOARCH=amd64 go build -o promptmq-linux-amd64 main.go)",
+      "Bash(mv:*)"
     ],
     "deny": [],
     "ask": []
