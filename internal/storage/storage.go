@@ -75,6 +75,7 @@ type Manager struct {
 	totalMessages atomic.Uint64
 	totalBytes    atomic.Uint64
 	metrics       StorageMetrics // For WAL performance metrics
+	compaction    *CompactionManager // WAL compaction manager
 }
 
 // NewMemoryBuffer creates a new memory buffer
@@ -162,6 +163,9 @@ func NewWithMetrics(cfg *config.Config, logger zerolog.Logger, metrics StorageMe
 		metrics:   metrics,
 	}
 
+	// Initialize compaction manager
+	m.compaction = NewCompactionManager(cfg, logger, m, metrics)
+
 	return m, nil
 }
 
@@ -194,6 +198,11 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.wg.Add(1)
 	go m.metricsLoop()
 
+	// Start compaction manager
+	if err := m.compaction.Start(); err != nil {
+		return fmt.Errorf("failed to start compaction manager: %w", err)
+	}
+
 	return nil
 }
 
@@ -207,6 +216,11 @@ func (m *Manager) StopManager() error {
 	// Stop sync ticker
 	if m.syncTicker != nil {
 		m.syncTicker.Stop()
+	}
+
+	// Stop compaction manager
+	if err := m.compaction.Stop(); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to stop compaction manager")
 	}
 
 	// Wait for background goroutines to finish
@@ -795,7 +809,7 @@ func (m *Manager) GetStats() map[string]interface{} {
 		return true
 	})
 
-	return map[string]interface{}{
+	stats := map[string]interface{}{
 		"total_messages":      m.totalMessages.Load(),
 		"total_bytes":         m.totalBytes.Load(),
 		"topic_count":         topicCount,
@@ -803,6 +817,14 @@ func (m *Manager) GetStats() map[string]interface{} {
 		"memory_buffer_count": m.memBuffer.Count(),
 		"next_message_id":     m.messageID.Load() + 1,
 	}
+
+	// Add compaction statistics
+	compactionStats := m.compaction.GetCompactionStats()
+	for k, v := range compactionStats {
+		stats["compaction_"+k] = v
+	}
+
+	return stats
 }
 
 // Compact performs WAL compaction for a topic (removes old entries)
