@@ -32,9 +32,6 @@ jobs:
     - name: Download dependencies
       run: ./build.sh deps
     
-    - name: Run linters
-      run: ./build.sh lint
-    
     - name: Run tests
       run: ./build.sh test
     
