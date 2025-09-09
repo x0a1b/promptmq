@@ -139,7 +139,7 @@ build() {
     mkdir -p "$BUILD_DIR"
     
     # Build for current platform
-    CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o "$BUILD_DIR/$APP_NAME" ./cmd/promptmq
+    CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o "$BUILD_DIR/$APP_NAME" .
     
     # Make executable
     chmod +x "$BUILD_DIR/$APP_NAME"
@@ -178,7 +178,7 @@ build_all() {
         CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
             -ldflags "$LDFLAGS" \
             -o "$output_name" \
-            ./cmd/promptmq
+            .
         
         # Compress binary
         if command -v upx &> /dev/null; then
