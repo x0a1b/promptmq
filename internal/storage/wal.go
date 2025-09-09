@@ -7,16 +7,29 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
+)
+
+// SyncMode defines WAL synchronization strategies
+type SyncMode int
+
+const (
+	SyncPeriodic  SyncMode = iota // Current behavior - sync at intervals
+	SyncImmediate                 // fsync after every write (SQLite-like)
+	SyncBatch                     // fsync after N messages or timeout
 )
 
 // WAL implements a high-performance Write-Ahead Log
 type WAL struct {
-	file   *os.File
-	writer *bufio.Writer
-	mu     sync.RWMutex
-	offset uint64
-	path   string
-	noSync bool
+	file          *os.File
+	writer        *bufio.Writer
+	mu            sync.RWMutex
+	offset        uint64
+	path          string
+	noSync        bool
+	syncMode      SyncMode
+	batchCounter  atomic.Int64
+	batchSyncSize int64
 }
 
 // WALReader provides sequential access to WAL entries
@@ -38,8 +51,13 @@ const (
 	walBufferSize = 64 * 1024 // 64KB buffer
 )
 
-// NewWAL creates a new WAL instance
+// NewWAL creates a new WAL instance with default sync mode
 func NewWAL(path string) (*WAL, error) {
+	return NewWALWithMode(path, SyncPeriodic, 0)
+}
+
+// NewWALWithMode creates a new WAL instance with specified sync mode
+func NewWALWithMode(path string, syncMode SyncMode, batchSize int64) (*WAL, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open WAL file: %w", err)
@@ -53,11 +71,16 @@ func NewWAL(path string) (*WAL, error) {
 	}
 
 	wal := &WAL{
-		file:   file,
-		writer: bufio.NewWriterSize(file, walBufferSize),
-		offset: uint64(stat.Size()),
-		path:   path,
+		file:          file,
+		writer:        bufio.NewWriterSize(file, walBufferSize),
+		offset:        uint64(stat.Size()),
+		path:          path,
+		syncMode:      syncMode,
+		batchSyncSize: batchSize,
 	}
+
+	// Initialize batch counter
+	wal.batchCounter.Store(0)
 
 	return wal, nil
 }
@@ -91,6 +114,52 @@ func (w *WAL) Write(data []byte) (uint64, error) {
 
 	currentOffset := w.offset
 	w.offset += uint64(walHeaderSize + len(data))
+
+	// Handle sync mode
+	switch w.syncMode {
+	case SyncImmediate:
+		// Immediate sync for maximum durability (SQLite-like)
+		if err := w.writer.Flush(); err != nil {
+			return 0, fmt.Errorf("failed to flush WAL writer in immediate mode: %w", err)
+		}
+		if !w.noSync {
+			if err := w.file.Sync(); err != nil {
+				return 0, fmt.Errorf("failed to sync WAL file in immediate mode: %w", err)
+			}
+		}
+	case SyncBatch:
+		// Batch sync after N messages
+		if w.batchSyncSize > 0 {
+			current := w.batchCounter.Add(1)
+			if current >= w.batchSyncSize {
+				if err := w.writer.Flush(); err != nil {
+					return 0, fmt.Errorf("failed to flush WAL writer in batch mode: %w", err)
+				}
+				if !w.noSync {
+					if err := w.file.Sync(); err != nil {
+						return 0, fmt.Errorf("failed to sync WAL file in batch mode: %w", err)
+					}
+				}
+				w.batchCounter.Store(0) // Reset counter after successful sync
+			}
+		} else {
+			// Fallback to immediate sync if batch size is invalid
+			if err := w.writer.Flush(); err != nil {
+				return 0, fmt.Errorf("failed to flush WAL writer (batch fallback): %w", err)
+			}
+			if !w.noSync {
+				if err := w.file.Sync(); err != nil {
+					return 0, fmt.Errorf("failed to sync WAL file (batch fallback): %w", err)
+				}
+			}
+		}
+	case SyncPeriodic:
+		// No immediate sync - handled by background sync loop
+		// This provides best performance but lowest durability guarantees
+	default:
+		// Unknown sync mode - fallback to periodic
+		// This ensures system doesn't fail on invalid configuration
+	}
 
 	return currentOffset, nil
 }
@@ -349,6 +418,45 @@ func (w *WAL) SetNoSync(noSync bool) {
 	w.noSync = noSync
 }
 
+// SetSyncMode changes the sync mode at runtime
+func (w *WAL) SetSyncMode(syncMode SyncMode, batchSize int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.syncMode = syncMode
+	w.batchSyncSize = batchSize
+	w.batchCounter.Store(0) // Reset batch counter
+}
+
+// GetSyncMode returns the current sync mode
+func (w *WAL) GetSyncMode() SyncMode {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.syncMode
+}
+
+// ForceBatchSync forces a sync in batch mode regardless of counter
+func (w *WAL) ForceBatchSync() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.syncMode != SyncBatch {
+		return fmt.Errorf("force batch sync only available in batch mode")
+	}
+
+	if err := w.writer.Flush(); err != nil {
+		return fmt.Errorf("failed to flush WAL writer during force batch sync: %w", err)
+	}
+
+	if !w.noSync {
+		if err := w.file.Sync(); err != nil {
+			return fmt.Errorf("failed to sync WAL file during force batch sync: %w", err)
+		}
+	}
+
+	w.batchCounter.Store(0) // Reset counter
+	return nil
+}
+
 // BatchWriter provides batched writing capabilities for better performance
 type BatchWriter struct {
 	wal     *WAL
@@ -414,9 +522,23 @@ func (w *WAL) Stats() map[string]interface{} {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	syncModeStr := "unknown"
+	switch w.syncMode {
+	case SyncImmediate:
+		syncModeStr = "immediate"
+	case SyncBatch:
+		syncModeStr = "batch"
+	case SyncPeriodic:
+		syncModeStr = "periodic"
+	}
+
 	return map[string]interface{}{
-		"path":   w.path,
-		"size":   w.offset,
-		"nosync": w.noSync,
+		"path":             w.path,
+		"size":             w.offset,
+		"nosync":           w.noSync,
+		"sync_mode":        syncModeStr,
+		"batch_size":       w.batchSyncSize,
+		"batch_counter":    w.batchCounter.Load(),
+		"pending_batch":    w.batchCounter.Load() > 0,
 	}
 }

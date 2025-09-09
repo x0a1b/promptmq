@@ -54,7 +54,16 @@ type StorageConfig struct {
 	MemoryBuffer    uint64              `mapstructure:"memory-buffer"`
 	WALSyncInterval time.Duration       `mapstructure:"wal-sync-interval"`
 	WALNoSync       bool                `mapstructure:"wal-no-sync"`
+	WAL             WALConfig           `mapstructure:"wal"`
 	Compaction      CompactionConfig    `mapstructure:"compaction"`
+}
+
+type WALConfig struct {
+	SyncMode                string        `mapstructure:"sync-mode"`
+	SyncInterval            time.Duration `mapstructure:"sync-interval"`
+	BatchSyncSize           int           `mapstructure:"batch-sync-size"`
+	ForceFsync              bool          `mapstructure:"force-fsync"`
+	CrashRecoveryValidation bool          `mapstructure:"crash-recovery-validation"`
 }
 
 type CompactionConfig struct {
@@ -131,6 +140,13 @@ func setDefaults() {
 	viper.SetDefault("storage.wal-sync-interval", "100ms")
 	viper.SetDefault("storage.wal-no-sync", false)
 	
+	// WAL durability defaults
+	viper.SetDefault("storage.wal.sync-mode", "periodic")
+	viper.SetDefault("storage.wal.sync-interval", "100ms")
+	viper.SetDefault("storage.wal.batch-sync-size", 100)
+	viper.SetDefault("storage.wal.force-fsync", false)
+	viper.SetDefault("storage.wal.crash-recovery-validation", false)
+	
 	// Compaction defaults
 	viper.SetDefault("storage.compaction.max-message-age", "2h")
 	viper.SetDefault("storage.compaction.max-wal-size", 104857600) // 100MB
@@ -163,6 +179,26 @@ func validate(cfg *Config) error {
 	// Validate TLS configuration
 	if cfg.Server.TLS && (cfg.Server.TLSCert == "" || cfg.Server.TLSKey == "") {
 		return fmt.Errorf("tls-cert and tls-key must be provided when TLS is enabled")
+	}
+
+	// Validate WAL sync mode
+	validSyncModes := map[string]bool{
+		"periodic":  true,
+		"immediate": true,
+		"batch":     true,
+	}
+	if !validSyncModes[cfg.Storage.WAL.SyncMode] {
+		return fmt.Errorf("invalid wal sync-mode: %s, must be one of: periodic, immediate, batch", cfg.Storage.WAL.SyncMode)
+	}
+
+	// Validate batch sync size
+	if cfg.Storage.WAL.SyncMode == "batch" && cfg.Storage.WAL.BatchSyncSize <= 0 {
+		return fmt.Errorf("batch-sync-size must be positive when sync-mode is batch")
+	}
+
+	// Validate sync interval
+	if cfg.Storage.WAL.SyncMode == "periodic" && cfg.Storage.WAL.SyncInterval <= 0 {
+		return fmt.Errorf("sync-interval must be positive when sync-mode is periodic")
 	}
 
 	return nil

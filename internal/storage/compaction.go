@@ -34,6 +34,9 @@ type CompactionManager struct {
 	totalCompactions   uint64
 	totalSpaceReclaimed uint64
 	totalMessagesRemoved uint64
+	
+	// Shutdown management
+	stopOnce sync.Once
 	compactionDuration  time.Duration
 	mu                 sync.RWMutex
 }
@@ -95,14 +98,18 @@ func (cm *CompactionManager) Start() error {
 
 // Stop gracefully shuts down the compaction manager
 func (cm *CompactionManager) Stop() error {
-	cm.logger.Info().Msg("Stopping WAL compaction manager")
-	
-	cm.cancel()
-	cm.wg.Wait()
-	
-	// Close channels
-	close(cm.criticalQueue)
-	close(cm.normalQueue)
+	var err error
+	cm.stopOnce.Do(func() {
+		cm.logger.Info().Msg("Stopping WAL compaction manager")
+		
+		cm.cancel()
+		cm.wg.Wait()
+		
+		// Close channels safely
+		close(cm.criticalQueue)
+		close(cm.normalQueue)
+	})
+	return err
 	
 	cm.logger.Info().
 		Uint64("total_compactions", cm.totalCompactions).
