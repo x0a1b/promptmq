@@ -49,12 +49,12 @@ type Server struct {
 	topicByteCounts      *prometheus.CounterVec
 	topicSubscriberGauge *prometheus.GaugeVec
 
-	// Storage/WAL metrics
-	walWriteLatencyHist prometheus.Histogram
-	walWriteErrorsTotal prometheus.Counter
-	walBufferUsageGauge prometheus.Gauge
-	walRecoveryTimeHist prometheus.Histogram
-	persistenceOpsTotal *prometheus.CounterVec
+	// Storage metrics
+	storageWriteLatencyHist prometheus.Histogram
+	storageWriteErrorsTotal prometheus.Counter
+	storageUsageGauge       prometheus.Gauge
+	recoveryTimeHist        prometheus.Histogram
+	persistenceOpsTotal     *prometheus.CounterVec
 
 	// System metrics
 	memoryUsageGauge    prometheus.Gauge
@@ -195,26 +195,26 @@ func (s *Server) initMetrics() error {
 		}, []string{"topic"},
 	)
 
-	// Storage/WAL metrics with optimized latency buckets
-	s.walWriteLatencyHist = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "promptmq_wal_write_latency_microseconds",
-		Help:    "WAL write latency in microseconds",
+	// Storage/SQLite metrics with optimized latency buckets
+	s.storageWriteLatencyHist = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "promptmq_sqlite_write_latency_microseconds",
+		Help:    "SQLite write latency in microseconds",
 		Buckets: []float64{50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000}, // 50µs to 25ms
 	})
 
-	s.walWriteErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "promptmq_wal_write_errors_total",
-		Help: "Total WAL write errors",
+	s.storageWriteErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "promptmq_sqlite_write_errors_total",
+		Help: "Total SQLite write errors",
 	})
 
-	s.walBufferUsageGauge = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "promptmq_wal_buffer_usage_bytes",
-		Help: "Current WAL buffer usage in bytes",
+	s.storageUsageGauge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "promptmq_storage_usage_bytes",
+		Help: "Current storage usage in bytes",
 	})
 
-	s.walRecoveryTimeHist = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "promptmq_wal_recovery_duration_seconds",
-		Help:    "WAL recovery duration in seconds",
+	s.recoveryTimeHist = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "promptmq_recovery_duration_seconds",
+		Help:    "Database recovery duration in seconds",
 		Buckets: []float64{0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0}, // 100ms to 1min
 	})
 
@@ -276,10 +276,10 @@ func (s *Server) initMetrics() error {
 		s.topicMessageCounts,
 		s.topicByteCounts,
 		s.topicSubscriberGauge,
-		s.walWriteLatencyHist,
-		s.walWriteErrorsTotal,
-		s.walBufferUsageGauge,
-		s.walRecoveryTimeHist,
+		s.storageWriteLatencyHist,
+		s.storageWriteErrorsTotal,
+		s.storageUsageGauge,
+		s.recoveryTimeHist,
 		s.persistenceOpsTotal,
 		s.memoryUsageGauge,
 		s.goroutineCountGauge,
@@ -413,28 +413,28 @@ func (s *Server) updateSystemMetrics() {
 	s.uptimeGauge.Set(uptime)
 }
 
-// RecordWALWrite records WAL write metrics (called by storage layer)
-func (s *Server) RecordWALWrite(latency time.Duration, success bool) {
+// RecordSQLiteWrite records SQLite write metrics (called by storage layer)
+func (s *Server) RecordSQLiteWrite(latency time.Duration, success bool) {
 	// Convert to microseconds for precision
 	latencyMicros := float64(latency.Nanoseconds()) / 1000.0
-	s.walWriteLatencyHist.Observe(latencyMicros)
+	s.storageWriteLatencyHist.Observe(latencyMicros)
 
 	if success {
 		s.persistenceOpsTotal.WithLabelValues("write", "success").Inc()
 	} else {
 		s.persistenceOpsTotal.WithLabelValues("write", "error").Inc()
-		s.walWriteErrorsTotal.Inc()
+		s.storageWriteErrorsTotal.Inc()
 	}
 }
 
-// RecordWALBufferUsage records current WAL buffer usage
-func (s *Server) RecordWALBufferUsage(bytes int64) {
-	s.walBufferUsageGauge.Set(float64(bytes))
+// RecordStorageUsage records current storage usage
+func (s *Server) RecordStorageUsage(bytes int64) {
+	s.storageUsageGauge.Set(float64(bytes))
 }
 
-// RecordWALRecovery records WAL recovery time
-func (s *Server) RecordWALRecovery(duration time.Duration) {
-	s.walRecoveryTimeHist.Observe(duration.Seconds())
+// RecordRecovery records database recovery time
+func (s *Server) RecordRecovery(duration time.Duration) {
+	s.recoveryTimeHist.Observe(duration.Seconds())
 }
 
 // RecordThroughput records current message throughput

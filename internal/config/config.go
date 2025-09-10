@@ -49,28 +49,24 @@ type MQTTConfig struct {
 }
 
 type StorageConfig struct {
-	DataDir         string           `mapstructure:"data-dir"`
-	WALDir          string           `mapstructure:"wal-dir"`
-	MemoryBuffer    uint64           `mapstructure:"memory-buffer"`
-	WALSyncInterval time.Duration    `mapstructure:"wal-sync-interval"`
-	WALNoSync       bool             `mapstructure:"wal-no-sync"`
-	WAL             WALConfig        `mapstructure:"wal"`
-	Compaction      CompactionConfig `mapstructure:"compaction"`
+	DataDir    string         `mapstructure:"data-dir"`
+	Cleanup    CleanupConfig  `mapstructure:"cleanup"`
+	SQLite     SQLiteConfig   `mapstructure:"sqlite"`
 }
 
-type WALConfig struct {
-	SyncMode                string        `mapstructure:"sync-mode"`
-	SyncInterval            time.Duration `mapstructure:"sync-interval"`
-	BatchSyncSize           int           `mapstructure:"batch-sync-size"`
-	ForceFsync              bool          `mapstructure:"force-fsync"`
-	CrashRecoveryValidation bool          `mapstructure:"crash-recovery-validation"`
+type SQLiteConfig struct {
+	CacheSize    int64  `mapstructure:"cache-size"`     // _cache_size (pages, negative for KB)
+	TempStore    string `mapstructure:"temp-store"`    // _temp_store (MEMORY, FILE, DEFAULT)
+	MmapSize     int64  `mapstructure:"mmap-size"`     // _mmap_size (bytes)
+	BusyTimeout  int    `mapstructure:"busy-timeout"`  // _busy_timeout (milliseconds)
+	Synchronous  string `mapstructure:"synchronous"`   // _synchronous (OFF, NORMAL, FULL, EXTRA)
+	JournalMode  string `mapstructure:"journal-mode"`  // _journal_mode (DELETE, TRUNCATE, PERSIST, MEMORY, WAL, OFF)
+	ForeignKeys  bool   `mapstructure:"foreign-keys"`  // _foreign_keys (ON/OFF)
 }
 
-type CompactionConfig struct {
+type CleanupConfig struct {
 	MaxMessageAge     time.Duration `mapstructure:"max-message-age"`
-	MaxWALSize        uint64        `mapstructure:"max-wal-size"`
 	CheckInterval     time.Duration `mapstructure:"check-interval"`
-	ConcurrentWorkers int           `mapstructure:"concurrent-workers"`
 	BatchSize         int           `mapstructure:"batch-size"`
 }
 
@@ -135,24 +131,20 @@ func setDefaults() {
 
 	// Storage defaults
 	viper.SetDefault("storage.data-dir", "./data")
-	viper.SetDefault("storage.wal-dir", "./wal")
-	viper.SetDefault("storage.memory-buffer", 268435456) // 256MB
-	viper.SetDefault("storage.wal-sync-interval", "100ms")
-	viper.SetDefault("storage.wal-no-sync", false)
 
-	// WAL durability defaults
-	viper.SetDefault("storage.wal.sync-mode", "periodic")
-	viper.SetDefault("storage.wal.sync-interval", "100ms")
-	viper.SetDefault("storage.wal.batch-sync-size", 100)
-	viper.SetDefault("storage.wal.force-fsync", false)
-	viper.SetDefault("storage.wal.crash-recovery-validation", false)
+	// Cleanup defaults (for old message cleanup)
+	viper.SetDefault("storage.cleanup.max-message-age", "24h")
+	viper.SetDefault("storage.cleanup.check-interval", "1h")
+	viper.SetDefault("storage.cleanup.batch-size", 1000)
 
-	// Compaction defaults
-	viper.SetDefault("storage.compaction.max-message-age", "2h")
-	viper.SetDefault("storage.compaction.max-wal-size", 104857600) // 100MB
-	viper.SetDefault("storage.compaction.check-interval", "5m")
-	viper.SetDefault("storage.compaction.concurrent-workers", 2)
-	viper.SetDefault("storage.compaction.batch-size", 1000)
+	// SQLite defaults (optimized for performance)
+	viper.SetDefault("storage.sqlite.cache-size", 50000)        // 50k pages (~200MB cache)
+	viper.SetDefault("storage.sqlite.temp-store", "MEMORY")     // Store temp tables in memory
+	viper.SetDefault("storage.sqlite.mmap-size", 268435456)     // 256MB memory-mapped I/O
+	viper.SetDefault("storage.sqlite.busy-timeout", 30000)      // 30 second busy timeout
+	viper.SetDefault("storage.sqlite.synchronous", "NORMAL")    // Balance safety vs performance
+	viper.SetDefault("storage.sqlite.journal-mode", "WAL")      // Write-Ahead Logging mode
+	viper.SetDefault("storage.sqlite.foreign-keys", true)       // Enable foreign key constraints
 
 	// Cluster defaults
 	viper.SetDefault("cluster.enabled", false)
@@ -171,34 +163,50 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("max-qos must be 0, 1, or 2")
 	}
 
-	// Validate memory buffer size (minimum 1MB)
-	if cfg.Storage.MemoryBuffer < 1048576 {
-		return fmt.Errorf("memory-buffer must be at least 1MB (1048576 bytes)")
-	}
-
 	// Validate TLS configuration
 	if cfg.Server.TLS && (cfg.Server.TLSCert == "" || cfg.Server.TLSKey == "") {
 		return fmt.Errorf("tls-cert and tls-key must be provided when TLS is enabled")
 	}
 
-	// Validate WAL sync mode
-	validSyncModes := map[string]bool{
-		"periodic":  true,
-		"immediate": true,
-		"batch":     true,
-	}
-	if !validSyncModes[cfg.Storage.WAL.SyncMode] {
-		return fmt.Errorf("invalid wal sync-mode: %s, must be one of: periodic, immediate, batch", cfg.Storage.WAL.SyncMode)
+	// Validate cleanup configuration
+	if cfg.Storage.Cleanup.MaxMessageAge <= 0 {
+		return fmt.Errorf("max-message-age must be positive")
 	}
 
-	// Validate batch sync size
-	if cfg.Storage.WAL.SyncMode == "batch" && cfg.Storage.WAL.BatchSyncSize <= 0 {
-		return fmt.Errorf("batch-sync-size must be positive when sync-mode is batch")
+	if cfg.Storage.Cleanup.CheckInterval <= 0 {
+		return fmt.Errorf("check-interval must be positive")
 	}
 
-	// Validate sync interval
-	if cfg.Storage.WAL.SyncMode == "periodic" && cfg.Storage.WAL.SyncInterval <= 0 {
-		return fmt.Errorf("sync-interval must be positive when sync-mode is periodic")
+	if cfg.Storage.Cleanup.BatchSize <= 0 {
+		return fmt.Errorf("cleanup batch-size must be positive")
+	}
+
+	// Validate SQLite configuration
+	validTempStores := map[string]bool{"MEMORY": true, "FILE": true, "DEFAULT": true}
+	if !validTempStores[cfg.Storage.SQLite.TempStore] {
+		return fmt.Errorf("sqlite temp-store must be MEMORY, FILE, or DEFAULT")
+	}
+
+	validSynchronous := map[string]bool{"OFF": true, "NORMAL": true, "FULL": true, "EXTRA": true}
+	if !validSynchronous[cfg.Storage.SQLite.Synchronous] {
+		return fmt.Errorf("sqlite synchronous must be OFF, NORMAL, FULL, or EXTRA")
+	}
+
+	validJournalModes := map[string]bool{"DELETE": true, "TRUNCATE": true, "PERSIST": true, "MEMORY": true, "WAL": true, "OFF": true}
+	if !validJournalModes[cfg.Storage.SQLite.JournalMode] {
+		return fmt.Errorf("sqlite journal-mode must be DELETE, TRUNCATE, PERSIST, MEMORY, WAL, or OFF")
+	}
+
+	if cfg.Storage.SQLite.CacheSize == 0 {
+		return fmt.Errorf("sqlite cache-size must be non-zero")
+	}
+
+	if cfg.Storage.SQLite.MmapSize < 0 {
+		return fmt.Errorf("sqlite mmap-size must be non-negative")
+	}
+
+	if cfg.Storage.SQLite.BusyTimeout < 0 {
+		return fmt.Errorf("sqlite busy-timeout must be non-negative")
 	}
 
 	return nil

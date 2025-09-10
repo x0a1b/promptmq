@@ -2,6 +2,7 @@ package storage
 
 import (
 	"log/slog"
+	"time"
 
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/storage"
@@ -67,7 +68,42 @@ func (m *Manager) OnUnsubscribe(cl *mqtt.Client, pk packets.Packet) packets.Pack
 
 // OnRetainPublished is called when a retained message is published
 func (m *Manager) OnRetainPublished(cl *mqtt.Client, pk packets.Packet) {
-	m.logger.Debug().Str("client_id", cl.ID).Str("topic", pk.TopicName).Msg("Retained message published")
+	m.logger.Debug().
+		Str("client_id", cl.ID).
+		Str("topic", pk.TopicName).
+		Int("payload_size", len(pk.Payload)).
+		Bool("retain_flag", pk.FixedHeader.Retain).
+		Msg("OnRetainPublished called")
+		
+	// If payload is empty, this is a delete retained message operation
+	if len(pk.Payload) == 0 {
+		m.deleteRetainedFromDB(pk.TopicName)
+		m.logger.Debug().
+			Str("client_id", cl.ID).
+			Str("topic", pk.TopicName).
+			Msg("Retained message deleted from SQLite")
+		return
+	}
+	
+	// Store retained message directly to SQLite
+	msg := &Message{
+		ID:        m.messageID.Add(1),
+		Topic:     pk.TopicName,
+		Payload:   pk.Payload,
+		QoS:       pk.FixedHeader.Qos,
+		Retain:    true,
+		ClientID:  cl.ID,
+		Timestamp: time.Now(),
+	}
+	
+	// Persist to SQLite
+	m.persistRetainedToDB(msg)
+	
+	m.logger.Debug().
+		Str("client_id", cl.ID).
+		Str("topic", pk.TopicName).
+		Int("payload_size", len(pk.Payload)).
+		Msg("Retained message published and stored")
 }
 
 // OnPacketIDExhausted is called when packet IDs are exhausted
@@ -107,10 +143,63 @@ func (m *Manager) StoredInflightMessages() ([]storage.Message, error) {
 	return []storage.Message{}, nil
 }
 
-// StoredRetainedMessages returns stored retained messages
+// StoredRetainedMessages returns stored retained messages from SQLite
 func (m *Manager) StoredRetainedMessages() ([]storage.Message, error) {
-	// We don't store retained messages persistently yet
-	return []storage.Message{}, nil
+	m.logger.Debug().Msg("StoredRetainedMessages called - querying SQLite database")
+	
+	// Query retained messages from SQLite
+	selectSQL := `SELECT topic, payload, qos, client_id, timestamp, msg_id FROM retained_messages`
+	rows, err := m.db.Query(selectSQL)
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to query retained messages from SQLite")
+		return []storage.Message{}, err
+	}
+	defer rows.Close()
+	
+	var messages []storage.Message
+	for rows.Next() {
+		var topic, clientID string
+		var payload []byte
+		var qos int
+		var timestampNano, msgID int64
+		
+		err := rows.Scan(&topic, &payload, &qos, &clientID, &timestampNano, &msgID)
+		if err != nil {
+			m.logger.Error().Err(err).Msg("Failed to scan retained message row")
+			continue
+		}
+		
+		storageMsg := storage.Message{
+			ID:        topic, // Use topic as ID for retained messages
+			T:         "retained",
+			Payload:   payload,
+			TopicName: topic,
+			Origin:    clientID,
+			Created:   timestampNano / 1e9, // Convert nanoseconds to seconds
+			Sent:      timestampNano / 1e9,
+			PacketID:  uint16(msgID),
+			FixedHeader: packets.FixedHeader{
+				Type:   packets.Publish,
+				Qos:    byte(qos),
+				Retain: true,
+			},
+		}
+		messages = append(messages, storageMsg)
+		
+		m.logger.Debug().
+			Str("topic", topic).
+			Str("client_id", clientID).
+			Int("payload_size", len(payload)).
+			Msg("Retrieved retained message from SQLite")
+	}
+	
+	if err = rows.Err(); err != nil {
+		m.logger.Error().Err(err).Msg("Error during retained message query iteration")
+		return messages, err
+	}
+	
+	m.logger.Debug().Int("retained_count", len(messages)).Msg("Retrieved retained messages from SQLite for MQTT server")
+	return messages, nil
 }
 
 // StoredSysInfo returns stored system info
@@ -147,7 +236,42 @@ func (m *Manager) OnPacketProcessed(cl *mqtt.Client, pk packets.Packet, err erro
 
 // OnRetainMessage is called when a message is retained
 func (m *Manager) OnRetainMessage(cl *mqtt.Client, pk packets.Packet, r int64) {
-	m.logger.Debug().Str("client_id", cl.ID).Str("topic", pk.TopicName).Msg("Message retained")
+	m.logger.Debug().
+		Str("client_id", cl.ID).
+		Str("topic", pk.TopicName).
+		Int("payload_size", len(pk.Payload)).
+		Bool("retain_flag", pk.FixedHeader.Retain).
+		Msg("OnRetainMessage called")
+		
+	// If payload is empty, this is a delete retained message operation
+	if len(pk.Payload) == 0 {
+		m.deleteRetainedFromDB(pk.TopicName)
+		m.logger.Debug().
+			Str("client_id", cl.ID).
+			Str("topic", pk.TopicName).
+			Msg("Retained message deleted from SQLite")
+		return
+	}
+	
+	// Store retained message directly to SQLite
+	msg := &Message{
+		ID:        m.messageID.Add(1),
+		Topic:     pk.TopicName,
+		Payload:   pk.Payload,
+		QoS:       pk.FixedHeader.Qos,
+		Retain:    true,
+		ClientID:  cl.ID,
+		Timestamp: time.Now(),
+	}
+	
+	// Persist to SQLite
+	m.persistRetainedToDB(msg)
+	
+	m.logger.Debug().
+		Str("client_id", cl.ID).
+		Str("topic", pk.TopicName).
+		Int("payload_size", len(pk.Payload)).
+		Msg("Retained message stored and persisted")
 }
 
 // OnQosPublish is called when a QoS > 0 message is published

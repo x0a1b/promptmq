@@ -27,24 +27,22 @@ mqtt:
 # Storage Configuration - Maximum Durability
 storage:
   data-dir: "./data"
-  wal-dir: "./wal"
-  memory-buffer: 1048576       # 1MB buffer for immediate flush
   
-  # WAL Settings - SQLite-like durability
-  wal:
-    sync-mode: "immediate"     # fsync after every write
-    sync-interval: 10ms        # Not used in immediate mode
-    batch-sync-size: 1         # Not used in immediate mode
-    force-fsync: true          # Force fsync to disk
-    crash-recovery-validation: true
+  # SQLite Configuration - Maximum safety and durability
+  sqlite:
+    cache-size: 25000          # 25k pages (~100MB cache) - conservative
+    temp-store: "FILE"         # Store temp data on disk for safety
+    mmap-size: 134217728       # 128MB memory-mapped I/O - conservative
+    busy-timeout: 60000        # 60 second timeout - high for reliability
+    synchronous: "FULL"        # Maximum durability - fsync on every write
+    journal-mode: "WAL"        # WAL with full synchronization
+    foreign-keys: true         # Enable all integrity constraints
     
-  # Compaction Settings - Conservative
-  compaction:
-    max-message-age: "24h"     # Longer retention for audit trails
-    max-wal-size: 52428800     # 50MB WAL files
-    check-interval: "10m"      # Less frequent compaction
-    concurrent-workers: 1      # Single worker to avoid conflicts
-    batch-size: 500
+  # Cleanup Settings - Longer retention for audit trails
+  cleanup:
+    max-message-age: "48h"     # 48 hour retention for audit trails
+    check-interval: "2h"       # Less frequent cleanup
+    batch-size: 100            # Conservative batch size
 
 # Clustering Disabled for Maximum Durability
 cluster:

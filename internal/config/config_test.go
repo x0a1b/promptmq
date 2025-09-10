@@ -2,7 +2,6 @@ package config
 
 import (
 	"testing"
-	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -21,9 +20,18 @@ func TestLoad(t *testing.T) {
 	assert.Equal(t, "info", cfg.Log.Level)
 	assert.Equal(t, "json", cfg.Log.Format)
 	assert.Equal(t, "0.0.0.0:1883", cfg.Server.Bind)
-	assert.Equal(t, uint64(268435456), cfg.Storage.MemoryBuffer) // 256MB
-	assert.Equal(t, time.Millisecond*100, cfg.Storage.WALSyncInterval)
+	assert.Equal(t, "./data", cfg.Storage.DataDir)
 	assert.Equal(t, uint8(2), cfg.MQTT.MaxQoS)
+	
+	// Test SQLite default values
+	assert.Equal(t, int64(50000), cfg.Storage.SQLite.CacheSize)
+	assert.Equal(t, "MEMORY", cfg.Storage.SQLite.TempStore)
+	assert.Equal(t, int64(268435456), cfg.Storage.SQLite.MmapSize)
+	assert.Equal(t, 30000, cfg.Storage.SQLite.BusyTimeout)
+	assert.Equal(t, "NORMAL", cfg.Storage.SQLite.Synchronous)
+	assert.Equal(t, "WAL", cfg.Storage.SQLite.JournalMode)
+	assert.True(t, cfg.Storage.SQLite.ForeignKeys)
+	
 	// Note: metrics.enabled defaults to true in setDefaults(), but mapstructure might initialize to false
 	// This is expected behavior, so let's check the actual value
 	t.Logf("Metrics.Enabled: %v", cfg.Metrics.Enabled)
@@ -50,9 +58,9 @@ func TestValidate(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name: "memory buffer too small",
+			name: "cleanup batch size too small",
 			modifyConfig: func(cfg *Config) {
-				cfg.Storage.MemoryBuffer = 1024 // Less than 1MB
+				cfg.Storage.Cleanup.BatchSize = -1
 			},
 			expectError: true,
 		},
@@ -61,6 +69,34 @@ func TestValidate(t *testing.T) {
 			modifyConfig: func(cfg *Config) {
 				cfg.Server.TLS = true
 				cfg.Server.TLSCert = ""
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid SQLite temp store",
+			modifyConfig: func(cfg *Config) {
+				cfg.Storage.SQLite.TempStore = "INVALID"
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid SQLite synchronous mode",
+			modifyConfig: func(cfg *Config) {
+				cfg.Storage.SQLite.Synchronous = "INVALID"
+			},
+			expectError: true,
+		},
+		{
+			name: "invalid SQLite journal mode",
+			modifyConfig: func(cfg *Config) {
+				cfg.Storage.SQLite.JournalMode = "INVALID"
+			},
+			expectError: true,
+		},
+		{
+			name: "zero SQLite cache size",
+			modifyConfig: func(cfg *Config) {
+				cfg.Storage.SQLite.CacheSize = 0
 			},
 			expectError: true,
 		},
@@ -94,7 +130,16 @@ func TestSetDefaults(t *testing.T) {
 	assert.Equal(t, "info", viper.GetString("log.level"))
 	assert.Equal(t, "json", viper.GetString("log.format"))
 	assert.Equal(t, "0.0.0.0:1883", viper.GetString("server.bind"))
-	assert.Equal(t, uint64(268435456), viper.GetUint64("storage.memory-buffer"))
+	assert.Equal(t, "./data", viper.GetString("storage.data-dir"))
 	assert.Equal(t, 2, viper.GetInt("mqtt.max-qos"))
 	assert.True(t, viper.GetBool("metrics.enabled"))
+	
+	// Test SQLite defaults
+	assert.Equal(t, int64(50000), viper.GetInt64("storage.sqlite.cache-size"))
+	assert.Equal(t, "MEMORY", viper.GetString("storage.sqlite.temp-store"))
+	assert.Equal(t, int64(268435456), viper.GetInt64("storage.sqlite.mmap-size"))
+	assert.Equal(t, 30000, viper.GetInt("storage.sqlite.busy-timeout"))
+	assert.Equal(t, "NORMAL", viper.GetString("storage.sqlite.synchronous"))
+	assert.Equal(t, "WAL", viper.GetString("storage.sqlite.journal-mode"))
+	assert.True(t, viper.GetBool("storage.sqlite.foreign-keys"))
 }

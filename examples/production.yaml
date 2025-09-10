@@ -26,27 +26,25 @@ mqtt:
   wildcard-available: true
   shared-sub-available: true
 
-# Storage Configuration - High Performance
+# Storage Configuration - Production Optimized
 storage:
   data-dir: "/var/lib/promptmq/data"
-  wal-dir: "/var/lib/promptmq/wal"
-  memory-buffer: 268435456     # 256MB buffer for high throughput
   
-  # WAL Settings - Maximum throughput
-  wal:
-    sync-mode: "periodic"      # Optimized for throughput
-    sync-interval: 100ms
-    batch-sync-size: 100
-    force-fsync: false         # Disable for maximum performance
-    crash-recovery-validation: false
+  # SQLite Configuration - Production performance
+  sqlite:
+    cache-size: 100000         # 100k pages (~400MB cache)
+    temp-store: "MEMORY"       # Store temp tables in memory
+    mmap-size: 536870912       # 512MB memory-mapped I/O
+    busy-timeout: 30000        # 30 second timeout
+    synchronous: "NORMAL"      # Good balance for production
+    journal-mode: "WAL"        # WAL mode for ACID compliance
+    foreign-keys: true         # Enable integrity constraints
     
-  # Compaction Settings - Production optimized
-  compaction:
-    max-message-age: "2h"      # 2-hour message retention
-    max-wal-size: 104857600    # 100MB WAL files
-    check-interval: "5m"       # Every 5 minutes
-    concurrent-workers: 2      # Parallel compaction
-    batch-size: 1000
+  # Cleanup Settings - Production retention
+  cleanup:
+    max-message-age: "24h"     # 24-hour message retention
+    check-interval: "1h"       # Check every hour
+    batch-size: 1000           # Process in batches
 
 # Clustering Configuration
 cluster:

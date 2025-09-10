@@ -15,9 +15,9 @@ var RootCmd = &cobra.Command{
 	Use:   "promptmq",
 	Short: "PromptMQ - High-performance MQTT broker with persistent messaging",
 	Long: `PromptMQ is a high-performance MQTT v5 broker written in Go that provides:
-- Persistent messaging with Write-Ahead Log (WAL)
-- Configurable memory buffer with disk overflow
-- Crash recovery and resilient storage
+- Persistent messaging with SQLite storage
+- Optimized SQLite storage with PRAGMA tuning
+- Reliable SQLite persistence and recovery
 - Clustering support for horizontal scaling
 - Comprehensive monitoring and metrics
 - Daemon mode for production deployment`,

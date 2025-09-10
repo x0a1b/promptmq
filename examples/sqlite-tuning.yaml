@@ -1,0 +1,99 @@
+# PromptMQ Configuration - SQLite Performance Tuning Examples
+# This file demonstrates various SQLite PRAGMA parameter configurations
+
+# Basic configuration with default SQLite settings
+server:
+  bind: "0.0.0.0:1883"
+
+storage:
+  data-dir: "./data"
+  
+  # Default SQLite configuration (optimized for general use)
+  sqlite:
+    cache-size: 50000          # 50k pages (~200MB cache)
+    temp-store: "MEMORY"       # Store temp tables in memory
+    mmap-size: 268435456       # 256MB memory-mapped I/O
+    busy-timeout: 30000        # 30 second busy timeout
+    synchronous: "NORMAL"      # Balance safety vs performance
+    journal-mode: "WAL"        # Write-Ahead Logging mode
+    foreign-keys: true         # Enable foreign key constraints
+
+# High Performance Configuration (for maximum throughput)
+# Uncomment and modify as needed:
+#
+# storage:
+#   sqlite:
+#     cache-size: 100000       # 100k pages (~400MB cache) 
+#     temp-store: "MEMORY"     # Keep temp data in RAM
+#     mmap-size: 536870912     # 512MB memory-mapped I/O
+#     busy-timeout: 5000       # Lower timeout for faster failures
+#     synchronous: "OFF"       # Maximum performance (less safe)
+#     journal-mode: "MEMORY"   # Keep journal in memory
+#     foreign-keys: false      # Disable for slight perf gain
+
+# High Durability Configuration (for maximum data safety)
+# Uncomment and modify as needed:
+#
+# storage:
+#   sqlite:
+#     cache-size: 25000        # 25k pages (~100MB cache)
+#     temp-store: "FILE"       # Store temp data on disk
+#     mmap-size: 134217728     # 128MB memory-mapped I/O
+#     busy-timeout: 60000      # Long timeout for reliability
+#     synchronous: "FULL"      # Maximum durability
+#     journal-mode: "WAL"      # WAL with full sync
+#     foreign-keys: true       # Enable all constraints
+
+# Memory-Constrained Configuration (for low-memory systems)
+# Uncomment and modify as needed:
+#
+# storage:
+#   sqlite:
+#     cache-size: 5000         # 5k pages (~20MB cache)
+#     temp-store: "DEFAULT"    # Let SQLite decide
+#     mmap-size: 0             # Disable memory mapping
+#     busy-timeout: 10000      # Moderate timeout
+#     synchronous: "NORMAL"    # Standard durability
+#     journal-mode: "DELETE"   # Traditional journaling
+#     foreign-keys: true       # Keep constraints
+
+# Notes on SQLite Parameters:
+# 
+# cache-size: Number of pages to cache in memory
+#   - Positive: pages (each ~4KB)  
+#   - Negative: kilobytes (e.g., -102400 = 100MB)
+#
+# temp-store: Where to store temporary tables and indices
+#   - MEMORY: In RAM (fastest)
+#   - FILE: On disk (saves RAM)
+#   - DEFAULT: SQLite default behavior
+#
+# mmap-size: Memory-mapped I/O size in bytes
+#   - 0: Disable memory mapping
+#   - >0: Map this many bytes of DB file to memory
+#
+# busy-timeout: Milliseconds to wait when DB is locked
+#   - Higher values reduce contention errors
+#   - Lower values fail faster under contention
+#
+# synchronous: Data safety vs performance trade-off
+#   - OFF: Fastest, least safe (risk of corruption)
+#   - NORMAL: Good balance (default)
+#   - FULL: Safest, slower writes
+#   - EXTRA: Maximum safety, slowest
+#
+# journal-mode: Transaction journaling method
+#   - DELETE: Traditional (slower)
+#   - TRUNCATE: Faster than DELETE
+#   - PERSIST: Keep journal file
+#   - MEMORY: Keep journal in RAM (fastest, less safe)
+#   - WAL: Write-Ahead Logging (recommended)
+#   - OFF: No journaling (dangerous)
+#
+# foreign-keys: Enable foreign key constraint checking
+#   - true: Enable (recommended for data integrity)
+#   - false: Disable (slight performance gain)
+
+metrics:
+  enabled: true
+  bind: "0.0.0.0:9090"

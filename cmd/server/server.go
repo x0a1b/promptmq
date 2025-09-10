@@ -31,11 +31,7 @@ func init() {
 	ServerCmd.Flags().String("tls-key", "", "TLS private key file path")
 
 	// Storage configuration
-	ServerCmd.Flags().String("data-dir", "./data", "Data directory for persistent storage")
-	ServerCmd.Flags().String("wal-dir", "./wal", "WAL directory for write-ahead logging")
-	ServerCmd.Flags().Uint64("memory-buffer", 268435456, "Memory buffer size in bytes (default 256MB)")
-	ServerCmd.Flags().Duration("wal-sync-interval", time.Millisecond*100, "WAL sync interval")
-	ServerCmd.Flags().Bool("wal-no-sync", false, "Disable WAL fsync for better performance (less durability)")
+	ServerCmd.Flags().String("data-dir", "./data", "Data directory for SQLite database")
 
 	// MQTT protocol configuration
 	ServerCmd.Flags().Uint16("max-packet-size", 65535, "Maximum MQTT packet size")

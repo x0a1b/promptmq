@@ -27,24 +27,22 @@ mqtt:
 # Storage Configuration - Cluster optimized
 storage:
   data-dir: "/var/lib/promptmq/data"
-  wal-dir: "/var/lib/promptmq/wal"
-  memory-buffer: 268435456     # 256MB buffer
   
-  # WAL Settings - Balanced for cluster
-  wal:
-    sync-mode: "batch"         # Batch sync for cluster consistency
-    sync-interval: 100ms
-    batch-sync-size: 100
-    force-fsync: false
-    crash-recovery-validation: true
+  # SQLite Configuration - Cluster consistency focused
+  sqlite:
+    cache-size: 75000          # 75k pages (~300MB cache)
+    temp-store: "MEMORY"       # Memory temp storage for performance
+    mmap-size: 268435456       # 256MB memory-mapped I/O
+    busy-timeout: 45000        # 45 second timeout for cluster coordination
+    synchronous: "NORMAL"      # Good balance for cluster environments
+    journal-mode: "WAL"        # WAL mode for consistency
+    foreign-keys: true         # Enable constraints for data integrity
     
-  # Compaction Settings
-  compaction:
-    max-message-age: "4h"      # Longer retention for cluster sync
-    max-wal-size: 104857600    # 100MB WAL files
-    check-interval: "5m"
-    concurrent-workers: 2
-    batch-size: 1000
+  # Cleanup Settings - Cluster friendly
+  cleanup:
+    max-message-age: "12h"     # Longer retention for cluster sync
+    check-interval: "1h"       # Regular cleanup
+    batch-size: 500            # Moderate batches for cluster
 
 # Clustering Configuration - EDIT FOR YOUR DEPLOYMENT
 cluster:

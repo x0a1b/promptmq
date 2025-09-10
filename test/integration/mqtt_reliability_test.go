@@ -34,18 +34,14 @@ type TestBroker struct {
 	cancel  context.CancelFunc
 	cfg     *config.Config
 	tempDir string
-	walDir  string
 }
 
 func setupTestBroker(t *testing.T) *TestBroker {
 	// Create temporary directories
 	tempDir := t.TempDir()
-	walDir := filepath.Join(tempDir, "wal")
 	dataDir := filepath.Join(tempDir, "data")
 
-	err := os.MkdirAll(walDir, 0755)
-	require.NoError(t, err)
-	err = os.MkdirAll(dataDir, 0755)
+	err := os.MkdirAll(dataDir, 0755)
 	require.NoError(t, err)
 
 	// Create test configuration
@@ -67,11 +63,12 @@ func setupTestBroker(t *testing.T) *TestBroker {
 			SharedSubAvailable: true,
 		},
 		Storage: config.StorageConfig{
-			DataDir:         dataDir,
-			WALDir:          walDir,
-			MemoryBuffer:    1048576, // 1MB for testing
-			WALSyncInterval: time.Millisecond * 10,
-			WALNoSync:       false,
+			DataDir: dataDir,
+			Cleanup: config.CleanupConfig{
+				MaxMessageAge: 24 * time.Hour,
+				CheckInterval: 1 * time.Hour,
+				BatchSize:     100,
+			},
 		},
 		Metrics: config.MetricsConfig{
 			Enabled: true,
@@ -92,7 +89,6 @@ func setupTestBroker(t *testing.T) *TestBroker {
 		cancel:  cancel,
 		cfg:     cfg,
 		tempDir: tempDir,
-		walDir:  walDir,
 	}
 
 	// Start broker in background
@@ -445,7 +441,6 @@ func TestMQTTCrashRecovery(t *testing.T) {
 
 	// Simulate crash by stopping broker
 	tempDir := tb1.tempDir
-	walDir := tb1.walDir
 	tb1.Stop()
 	publisher.Disconnect(1000)
 
@@ -455,7 +450,6 @@ func TestMQTTCrashRecovery(t *testing.T) {
 	// Second phase: restart and verify recovery
 	tb2 := &TestBroker{
 		tempDir: tempDir,
-		walDir:  walDir,
 	}
 
 	// Create new config using same directories
@@ -477,11 +471,12 @@ func TestMQTTCrashRecovery(t *testing.T) {
 			SharedSubAvailable: true,
 		},
 		Storage: config.StorageConfig{
-			DataDir:         filepath.Join(tempDir, "data"),
-			WALDir:          walDir,
-			MemoryBuffer:    1048576, // 1MB
-			WALSyncInterval: time.Millisecond * 10,
-			WALNoSync:       false,
+			DataDir: filepath.Join(tempDir, "data"),
+			Cleanup: config.CleanupConfig{
+				MaxMessageAge: 24 * time.Hour,
+				CheckInterval: 1 * time.Hour,
+				BatchSize:     100,
+			},
 		},
 		Metrics: config.MetricsConfig{
 			Enabled: true,

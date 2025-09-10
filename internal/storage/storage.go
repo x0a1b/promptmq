@@ -2,7 +2,7 @@ package storage
 
 import (
 	"context"
-	"encoding/binary"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,13 +10,32 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dgraph-io/badger/v4"
+	_ "github.com/mattn/go-sqlite3"
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/packets"
 	"github.com/rs/zerolog"
 
 	"github.com/x0a1b/promptmq/internal/config"
 )
+
+// buildSQLiteDSN constructs a SQLite DSN with configurable PRAGMA parameters
+func buildSQLiteDSN(dbPath string, sqliteCfg *config.SQLiteConfig) string {
+	foreignKeys := "OFF"
+	if sqliteCfg.ForeignKeys {
+		foreignKeys = "ON"
+	}
+
+	return fmt.Sprintf("%s?_journal_mode=%s&_synchronous=%s&_cache_size=%d&_foreign_keys=%s&_busy_timeout=%d&_temp_store=%s&_mmap_size=%d",
+		dbPath,
+		sqliteCfg.JournalMode,
+		sqliteCfg.Synchronous,
+		sqliteCfg.CacheSize,
+		foreignKeys,
+		sqliteCfg.BusyTimeout,
+		sqliteCfg.TempStore,
+		sqliteCfg.MmapSize,
+	)
+}
 
 // Message represents a persisted MQTT message
 type Message struct {
@@ -29,103 +48,34 @@ type Message struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// TopicWAL manages WAL for a specific topic
-type TopicWAL struct {
-	topic      string
-	wal        *WAL
-	lastOffset atomic.Uint64
-	memBuffer  *MemoryBuffer
-	mu         sync.RWMutex
-}
-
-// MemoryBuffer holds messages in memory before they overflow to disk
-type MemoryBuffer struct {
-	messages []*Message
-	size     atomic.Uint64
-	maxSize  uint64
-	mu       sync.RWMutex
-}
-
 // StorageMetrics defines the interface for storage metrics recording
 type StorageMetrics interface {
-	RecordWALWrite(latency time.Duration, success bool)
-	RecordWALBufferUsage(bytes int64)
-	RecordWALRecovery(duration time.Duration)
+	RecordSQLiteWrite(latency time.Duration, success bool)
+	RecordStorageUsage(bytes int64)
+	RecordRecovery(duration time.Duration)
 }
 
 // NoOpMetrics is a no-op implementation for when metrics are disabled
 type NoOpMetrics struct{}
 
-func (n *NoOpMetrics) RecordWALWrite(time.Duration, bool) {}
-func (n *NoOpMetrics) RecordWALBufferUsage(int64)         {}
-func (n *NoOpMetrics) RecordWALRecovery(time.Duration)    {}
+func (n *NoOpMetrics) RecordSQLiteWrite(time.Duration, bool) {}
+func (n *NoOpMetrics) RecordStorageUsage(int64)             {}
+func (n *NoOpMetrics) RecordRecovery(time.Duration)         {}
 
-// Manager implements enterprise-grade WAL persistence for MQTT messages
+// Manager implements SQLite-based persistence for MQTT messages
 type Manager struct {
-	cfg           *config.Config
-	logger        zerolog.Logger
-	db            *badger.DB
-	topicWALs     sync.Map // map[string]*TopicWAL
-	memBuffer     *MemoryBuffer
-	syncTicker    *time.Ticker
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	messageID     atomic.Uint64
-	totalMessages atomic.Uint64
-	totalBytes    atomic.Uint64
-	metrics       StorageMetrics     // For WAL performance metrics
-	compaction    *CompactionManager // WAL compaction manager
+	cfg             *config.Config
+	logger          zerolog.Logger
+	db              *sql.DB
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	messageID       atomic.Uint64
+	totalMessages   atomic.Uint64
+	totalBytes      atomic.Uint64
+	metrics         StorageMetrics // For SQLite performance metrics
 }
 
-// NewMemoryBuffer creates a new memory buffer
-func NewMemoryBuffer(maxSize uint64) *MemoryBuffer {
-	return &MemoryBuffer{
-		messages: make([]*Message, 0),
-		maxSize:  maxSize,
-	}
-}
-
-// Add adds a message to the memory buffer
-func (mb *MemoryBuffer) Add(msg *Message) bool {
-	mb.mu.Lock()
-	defer mb.mu.Unlock()
-
-	msgSize := uint64(len(msg.Payload) + len(msg.Topic) + len(msg.ClientID) + 64) // approximate overhead
-	if mb.size.Load()+msgSize > mb.maxSize {
-		return false // buffer full
-	}
-
-	mb.messages = append(mb.messages, msg)
-	mb.size.Add(msgSize)
-	return true
-}
-
-// Flush returns all messages and clears the buffer
-func (mb *MemoryBuffer) Flush() []*Message {
-	mb.mu.Lock()
-	defer mb.mu.Unlock()
-
-	messages := make([]*Message, len(mb.messages))
-	copy(messages, mb.messages)
-
-	mb.messages = mb.messages[:0]
-	mb.size.Store(0)
-
-	return messages
-}
-
-// Size returns the current buffer size
-func (mb *MemoryBuffer) Size() uint64 {
-	return mb.size.Load()
-}
-
-// Count returns the number of messages in the buffer
-func (mb *MemoryBuffer) Count() int {
-	mb.mu.RLock()
-	defer mb.mu.RUnlock()
-	return len(mb.messages)
-}
 
 // New creates a new storage manager
 func New(cfg *config.Config, logger zerolog.Logger) (*Manager, error) {
@@ -134,37 +84,46 @@ func New(cfg *config.Config, logger zerolog.Logger) (*Manager, error) {
 
 // NewWithMetrics creates a new storage manager with metrics integration
 func NewWithMetrics(cfg *config.Config, logger zerolog.Logger, metrics StorageMetrics) (*Manager, error) {
-	// Create data and WAL directories
+	// Create data directory
 	if err := os.MkdirAll(cfg.Storage.DataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
-	if err := os.MkdirAll(cfg.Storage.WALDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create WAL directory: %w", err)
+
+	// Open SQLite database with configurable PRAGMA parameters for optimal performance
+	dbPath := filepath.Join(cfg.Storage.DataDir, "promptmq.db")
+	dsn := buildSQLiteDSN(dbPath, &cfg.Storage.SQLite)
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
 	}
 
-	// Open BadgerDB for metadata and indexing
-	opts := badger.DefaultOptions(cfg.Storage.DataDir)
-	opts.Logger = &badgerLogger{logger: logger}
+	// Set connection pool settings for better performance
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
-	db, err := badger.Open(opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open BadgerDB: %w", err)
+	// Test the connection
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+	}
+
+	// Create database tables
+	if err := createTables(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create database tables: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	m := &Manager{
-		cfg:       cfg,
-		logger:    logger.With().Str("component", "storage").Logger(),
-		db:        db,
-		memBuffer: NewMemoryBuffer(cfg.Storage.MemoryBuffer),
-		ctx:       ctx,
-		cancel:    cancel,
-		metrics:   metrics,
+		cfg:     cfg,
+		logger:  logger.With().Str("component", "storage").Logger(),
+		db:      db,
+		ctx:     ctx,
+		cancel:  cancel,
+		metrics: metrics,
 	}
-
-	// Initialize compaction manager
-	m.compaction = NewCompactionManager(cfg, logger, m, metrics)
 
 	return m, nil
 }
@@ -173,542 +132,128 @@ func NewWithMetrics(cfg *config.Config, logger zerolog.Logger, metrics StorageMe
 func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info().
 		Str("data_dir", m.cfg.Storage.DataDir).
-		Str("wal_dir", m.cfg.Storage.WALDir).
-		Uint64("memory_buffer", m.cfg.Storage.MemoryBuffer).
-		Dur("sync_interval", m.cfg.Storage.WALSyncInterval).
-		Msg("Starting storage manager")
+		Msg("Starting SQLite storage manager")
 
-	// Recover from existing WAL files
-	if err := m.recover(); err != nil {
-		return fmt.Errorf("failed to recover from WAL: %w", err)
+	// Recover retained messages from SQLite
+	if err := m.recoverRetainedMessages(); err != nil {
+		return fmt.Errorf("failed to recover retained messages: %w", err)
 	}
-
-	// Start sync ticker if sync is enabled
-	if !m.cfg.Storage.WALNoSync {
-		m.syncTicker = time.NewTicker(m.cfg.Storage.WALSyncInterval)
-		m.wg.Add(1)
-		go m.syncLoop()
-	}
-
-	// Start memory buffer flush routine
-	m.wg.Add(1)
-	go m.bufferFlushLoop()
 
 	// Start metrics reporting loop
 	m.wg.Add(1)
 	go m.metricsLoop()
 
-	// Start compaction manager
-	if err := m.compaction.Start(); err != nil {
-		return fmt.Errorf("failed to start compaction manager: %w", err)
-	}
-
+	m.logger.Info().Msg("SQLite storage manager started")
 	return nil
 }
 
 // StopManager gracefully shuts down the storage manager
 func (m *Manager) StopManager() error {
-	m.logger.Info().Msg("Stopping storage manager")
+	m.logger.Info().Msg("Stopping SQLite storage manager")
 
 	// Cancel context to stop background routines
 	m.cancel()
 
-	// Stop sync ticker
-	if m.syncTicker != nil {
-		m.syncTicker.Stop()
-	}
-
-	// Stop compaction manager
-	if err := m.compaction.Stop(); err != nil {
-		m.logger.Error().Err(err).Msg("Failed to stop compaction manager")
-	}
-
 	// Wait for background goroutines to finish
 	m.wg.Wait()
 
-	// Flush remaining messages in memory buffer
-	if err := m.flushMemoryBuffer(); err != nil {
-		m.logger.Error().Err(err).Msg("Failed to flush memory buffer during shutdown")
-	}
-
-	// Close all topic WALs
-	m.topicWALs.Range(func(key, value interface{}) bool {
-		topicWAL := value.(*TopicWAL)
-		if err := topicWAL.wal.Close(); err != nil {
-			m.logger.Error().Err(err).Str("topic", key.(string)).Msg("Failed to close topic WAL")
-		}
-		return true
-	})
-
-	// Close BadgerDB
+	// Close SQLite database
 	if err := m.db.Close(); err != nil {
-		m.logger.Error().Err(err).Msg("Failed to close BadgerDB")
+		m.logger.Error().Err(err).Msg("Failed to close SQLite database")
 		return err
 	}
+
+	m.logger.Info().Msg("SQLite database closed")
 
 	m.logger.Info().
 		Uint64("total_messages", m.totalMessages.Load()).
 		Uint64("total_bytes", m.totalBytes.Load()).
-		Msg("Storage manager stopped")
+		Msg("SQLite storage manager stopped")
 
 	return nil
 }
 
-// getOrCreateTopicWAL gets or creates a WAL for a specific topic
-func (m *Manager) getOrCreateTopicWAL(topic string) (*TopicWAL, error) {
-	if topicWAL, exists := m.topicWALs.Load(topic); exists {
-		return topicWAL.(*TopicWAL), nil
-	}
-
-	// Create new WAL for this topic with configured sync mode
-	walPath := filepath.Join(m.cfg.Storage.WALDir, sanitizeTopicName(topic)+".wal")
-
-	syncMode := m.getSyncMode()
-	batchSize := int64(m.cfg.Storage.WAL.BatchSyncSize)
-
-	walInstance, err := NewWALWithMode(walPath, syncMode, batchSize)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create WAL for topic %s: %w", topic, err)
-	}
-
-	// Configure sync behavior based on config
-	if m.cfg.Storage.WAL.ForceFsync {
-		walInstance.SetNoSync(false) // Force fsync enabled
-	} else {
-		walInstance.SetNoSync(m.cfg.Storage.WALNoSync) // Use legacy setting
-	}
-
-	topicWAL := &TopicWAL{
-		topic:     topic,
-		wal:       walInstance,
-		memBuffer: NewMemoryBuffer(m.cfg.Storage.MemoryBuffer / 10), // 10% per topic
-	}
-
-	// Store in map
-	actual, loaded := m.topicWALs.LoadOrStore(topic, topicWAL)
-	if loaded {
-		// Another goroutine created it first, close our WAL and use theirs
-		walInstance.Close()
-		return actual.(*TopicWAL), nil
-	}
-
-	m.logger.Debug().Str("topic", topic).Str("wal_path", walPath).Msg("Created new topic WAL")
-	return topicWAL, nil
-}
-
-// persistMessage persists a message to the appropriate topic WAL
+// persistMessage persists a message to SQLite (for all messages now, not just retained)
 func (m *Manager) persistMessage(msg *Message) error {
-	// Always increment totalMessages for any persisted message
-	m.totalMessages.Add(1)
-
-	// Try to add to memory buffer first
-	if m.memBuffer.Add(msg) {
-		// Message added to memory buffer
-		return nil
-	}
-
-	// Memory buffer is full, write directly to WAL
-	return m.writeMessageToWAL(msg)
-}
-
-// writeMessageToWAL writes a message directly to the WAL
-func (m *Manager) writeMessageToWAL(msg *Message) error {
-	topicWAL, err := m.getOrCreateTopicWAL(msg.Topic)
-	if err != nil {
-		return err
-	}
-
-	// Serialize message
-	data, err := m.serializeMessage(msg)
-	if err != nil {
-		return fmt.Errorf("failed to serialize message: %w", err)
-	}
-
-	// Write to WAL with metrics timing
 	startTime := time.Now()
-	topicWAL.mu.Lock()
-	offset, err := topicWAL.wal.Write(data)
+
+	// Insert into messages table
+	insertSQL := `INSERT INTO messages (topic, payload, qos, retain, client_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)`
+	
+	_, err := m.db.Exec(insertSQL, msg.Topic, msg.Payload, msg.QoS, msg.Retain, msg.ClientID, msg.Timestamp.UnixNano())
 	writeLatency := time.Since(startTime)
+	
 	if err != nil {
-		topicWAL.mu.Unlock()
-		m.metrics.RecordWALWrite(writeLatency, false) // Record failed write
-		return fmt.Errorf("failed to write to WAL: %w", err)
+		m.metrics.RecordSQLiteWrite(writeLatency, false)
+		m.logger.Error().
+			Err(err).
+			Str("topic", msg.Topic).
+			Str("client_id", msg.ClientID).
+			Msg("Failed to persist message to SQLite")
+		return fmt.Errorf("failed to persist message to SQLite: %w", err)
 	}
-	topicWAL.lastOffset.Store(offset)
-	topicWAL.mu.Unlock()
 
 	// Record successful write metrics
-	m.metrics.RecordWALWrite(writeLatency, true)
+	m.metrics.RecordSQLiteWrite(writeLatency, true)
 
-	// Update metadata in BadgerDB
-	if err := m.updateMessageMetadata(msg, offset); err != nil {
-		m.logger.Error().Err(err).Msg("Failed to update message metadata")
-		// Don't return error as message is already in WAL
-	}
-
-	// Update byte statistics (message count updated in OnPublish)
-	m.totalBytes.Add(uint64(len(data)))
-
-	return nil
-}
-
-// serializeMessage converts a message to bytes for WAL storage
-func (m *Manager) serializeMessage(msg *Message) ([]byte, error) {
-	// Simple binary format: [id(8)][timestamp(8)][topic_len(4)][topic][payload_len(4)][payload][qos(1)][retain(1)][client_id_len(4)][client_id]
-	topicBytes := []byte(msg.Topic)
-	clientIDBytes := []byte(msg.ClientID)
-
-	size := 8 + 8 + 4 + len(topicBytes) + 4 + len(msg.Payload) + 1 + 1 + 4 + len(clientIDBytes)
-	buf := make([]byte, size)
-
-	offset := 0
-
-	// ID
-	binary.LittleEndian.PutUint64(buf[offset:], msg.ID)
-	offset += 8
-
-	// Timestamp
-	binary.LittleEndian.PutUint64(buf[offset:], uint64(msg.Timestamp.UnixNano()))
-	offset += 8
-
-	// Topic
-	binary.LittleEndian.PutUint32(buf[offset:], uint32(len(topicBytes)))
-	offset += 4
-	copy(buf[offset:], topicBytes)
-	offset += len(topicBytes)
-
-	// Payload
-	binary.LittleEndian.PutUint32(buf[offset:], uint32(len(msg.Payload)))
-	offset += 4
-	copy(buf[offset:], msg.Payload)
-	offset += len(msg.Payload)
-
-	// QoS
-	buf[offset] = msg.QoS
-	offset++
-
-	// Retain
-	if msg.Retain {
-		buf[offset] = 1
-	} else {
-		buf[offset] = 0
-	}
-	offset++
-
-	// Client ID
-	binary.LittleEndian.PutUint32(buf[offset:], uint32(len(clientIDBytes)))
-	offset += 4
-	copy(buf[offset:], clientIDBytes)
-
-	return buf, nil
-}
-
-// deserializeMessage converts bytes from WAL back to a message
-func (m *Manager) deserializeMessage(data []byte) (*Message, error) {
-	if len(data) < 26 { // minimum size
-		return nil, fmt.Errorf("invalid message data: too short")
-	}
-
-	offset := 0
-	msg := &Message{}
-
-	// ID
-	msg.ID = binary.LittleEndian.Uint64(data[offset:])
-	offset += 8
-
-	// Timestamp
-	msg.Timestamp = time.Unix(0, int64(binary.LittleEndian.Uint64(data[offset:])))
-	offset += 8
-
-	// Topic
-	topicLen := binary.LittleEndian.Uint32(data[offset:])
-	offset += 4
-	if offset+int(topicLen) > len(data) {
-		return nil, fmt.Errorf("invalid message data: topic length exceeds data")
-	}
-	msg.Topic = string(data[offset : offset+int(topicLen)])
-	offset += int(topicLen)
-
-	// Payload
-	if offset+4 > len(data) {
-		return nil, fmt.Errorf("invalid message data: no payload length")
-	}
-	payloadLen := binary.LittleEndian.Uint32(data[offset:])
-	offset += 4
-	if offset+int(payloadLen) > len(data) {
-		return nil, fmt.Errorf("invalid message data: payload length exceeds data")
-	}
-	msg.Payload = make([]byte, payloadLen)
-	copy(msg.Payload, data[offset:offset+int(payloadLen)])
-	offset += int(payloadLen)
-
-	// QoS
-	if offset >= len(data) {
-		return nil, fmt.Errorf("invalid message data: no QoS")
-	}
-	msg.QoS = data[offset]
-	offset++
-
-	// Retain
-	if offset >= len(data) {
-		return nil, fmt.Errorf("invalid message data: no retain flag")
-	}
-	msg.Retain = data[offset] == 1
-	offset++
-
-	// Client ID
-	if offset+4 > len(data) {
-		return nil, fmt.Errorf("invalid message data: no client ID length")
-	}
-	clientIDLen := binary.LittleEndian.Uint32(data[offset:])
-	offset += 4
-	if offset+int(clientIDLen) > len(data) {
-		return nil, fmt.Errorf("invalid message data: client ID length exceeds data")
-	}
-	msg.ClientID = string(data[offset : offset+int(clientIDLen)])
-
-	return msg, nil
-}
-
-// updateMessageMetadata stores message metadata in BadgerDB for indexing
-func (m *Manager) updateMessageMetadata(msg *Message, walOffset uint64) error {
-	return m.db.Update(func(txn *badger.Txn) error {
-		key := fmt.Sprintf("msg:%d", msg.ID)
-		value := fmt.Sprintf("%s:%d", msg.Topic, walOffset)
-		return txn.Set([]byte(key), []byte(value))
-	})
-}
-
-// syncLoop periodically syncs WAL files
-func (m *Manager) syncLoop() {
-	defer m.wg.Done()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-m.syncTicker.C:
-			m.syncAllWALs()
-		}
-	}
-}
-
-// syncAllWALs syncs all topic WAL files
-func (m *Manager) syncAllWALs() {
-	m.topicWALs.Range(func(key, value interface{}) bool {
-		topicWAL := value.(*TopicWAL)
-		topicWAL.mu.RLock()
-		err := topicWAL.wal.Sync()
-		topicWAL.mu.RUnlock()
-
-		if err != nil {
-			m.logger.Error().Err(err).Str("topic", key.(string)).Msg("Failed to sync WAL")
-		}
-		return true
-	})
-}
-
-// bufferFlushLoop periodically flushes the memory buffer
-func (m *Manager) bufferFlushLoop() {
-	defer m.wg.Done()
-
-	ticker := time.NewTicker(time.Second) // Flush every second
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			if err := m.flushMemoryBuffer(); err != nil {
-				m.logger.Error().Err(err).Msg("Failed to flush memory buffer")
-			}
-		}
-	}
-}
-
-// flushMemoryBuffer flushes all messages from memory buffer to WAL
-func (m *Manager) flushMemoryBuffer() error {
-	messages := m.memBuffer.Flush()
-	if len(messages) == 0 {
-		return nil
-	}
-
-	m.logger.Debug().Int("message_count", len(messages)).Msg("Flushing memory buffer to WAL")
-
-	for _, msg := range messages {
-		if err := m.writeMessageToWAL(msg); err != nil {
-			m.logger.Error().Err(err).Uint64("msg_id", msg.ID).Msg("Failed to write message to WAL during flush")
-			// Continue with other messages
-		}
-	}
-
-	return nil
-}
-
-// recover recovers messages from existing WAL files on startup
-func (m *Manager) recover() error {
-	m.logger.Info().Msg("Starting WAL recovery")
-	recoveryStart := time.Now()
-
-	walFiles, err := filepath.Glob(filepath.Join(m.cfg.Storage.WALDir, "*.wal"))
-	if err != nil {
-		return fmt.Errorf("failed to find WAL files: %w", err)
-	}
-
-	for _, walFile := range walFiles {
-		topic := getTopicFromWALFile(walFile)
-		if err := m.recoverTopicWAL(topic, walFile); err != nil {
-			m.logger.Error().Err(err).Str("wal_file", walFile).Msg("Failed to recover WAL file")
-			// Continue with other files
-		}
-	}
-
-	recoveryDuration := time.Since(recoveryStart)
-	m.metrics.RecordWALRecovery(recoveryDuration)
-
-	m.logger.Info().
-		Uint64("total_messages", m.totalMessages.Load()).
-		Int("wal_files", len(walFiles)).
-		Dur("recovery_duration", recoveryDuration).
-		Msg("WAL recovery completed")
-
-	return nil
-}
-
-// recoverTopicWAL recovers messages from a specific topic WAL file
-func (m *Manager) recoverTopicWAL(topic, walFile string) error {
-	syncMode := m.getSyncMode()
-	batchSize := int64(m.cfg.Storage.WAL.BatchSyncSize)
-
-	walInstance, err := NewWALWithMode(walFile, syncMode, batchSize)
-	if err != nil {
-		return fmt.Errorf("failed to open WAL file %s: %w", walFile, err)
-	}
-
-	// Configure sync behavior for recovery
-	if m.cfg.Storage.WAL.ForceFsync {
-		walInstance.SetNoSync(false) // Force fsync enabled
-	} else {
-		walInstance.SetNoSync(m.cfg.Storage.WALNoSync) // Use legacy setting
-	}
-
-	topicWAL := &TopicWAL{
-		topic:     topic,
-		wal:       walInstance,
-		memBuffer: NewMemoryBuffer(m.cfg.Storage.MemoryBuffer / 10),
-	}
-
-	// Read all entries from WAL
-	reader := walInstance.NewReader()
-	messageCount := uint64(0)
-	maxID := uint64(0)
-
-	for {
-		offset, data, err := reader.Next()
-		if err != nil {
-			if err.Error() == "EOF" || err.Error() == "no more entries" {
-				break
-			}
-			return fmt.Errorf("failed to read WAL entry: %w", err)
-		}
-
-		msg, err := m.deserializeMessage(data)
-		if err != nil {
-			m.logger.Error().Err(err).Uint64("offset", offset).Msg("Failed to deserialize message during recovery")
-			continue
-		}
-
-		// Update metadata in BadgerDB
-		if err := m.updateMessageMetadata(msg, offset); err != nil {
-			m.logger.Error().Err(err).Uint64("msg_id", msg.ID).Msg("Failed to update message metadata during recovery")
-		}
-
-		messageCount++
-		if msg.ID > maxID {
-			maxID = msg.ID
-		}
-		topicWAL.lastOffset.Store(offset)
-	}
-
-	// Update global message ID counter
-	if maxID > m.messageID.Load() {
-		m.messageID.Store(maxID)
-	}
-
-	// During recovery, we need to update our statistics to reflect what's on disk
-	// This helps with proper functioning after restart
-	m.totalMessages.Add(messageCount)
-	m.topicWALs.Store(topic, topicWAL)
+	// Update statistics
+	m.totalMessages.Add(1)
+	m.totalBytes.Add(uint64(len(msg.Payload) + len(msg.Topic) + len(msg.ClientID)))
 
 	m.logger.Debug().
-		Str("topic", topic).
-		Uint64("message_count", messageCount).
-		Uint64("max_id", maxID).
-		Msg("Recovered topic WAL")
+		Str("topic", msg.Topic).
+		Str("client_id", msg.ClientID).
+		Int("payload_size", len(msg.Payload)).
+		Bool("retain", msg.Retain).
+		Msg("Message persisted to SQLite")
 
 	return nil
 }
 
-// getSyncMode converts config string to SyncMode enum
-func (m *Manager) getSyncMode() SyncMode {
-	switch m.cfg.Storage.WAL.SyncMode {
-	case "immediate":
-		return SyncImmediate
-	case "batch":
-		return SyncBatch
-	case "periodic":
-		fallthrough
-	default:
-		return SyncPeriodic
+
+// createTables creates the SQLite tables for message storage
+func createTables(db *sql.DB) error {
+	// Create retained messages table
+	retainedSQL := `
+	CREATE TABLE IF NOT EXISTS retained_messages (
+		topic TEXT PRIMARY KEY,
+		payload BLOB,
+		qos INTEGER,
+		client_id TEXT,
+		timestamp INTEGER,
+		msg_id INTEGER
+	);
+	`
+	
+	if _, err := db.Exec(retainedSQL); err != nil {
+		return fmt.Errorf("failed to create retained_messages table: %w", err)
 	}
-}
 
-// sanitizeTopicName converts MQTT topic to safe filename
-func sanitizeTopicName(topic string) string {
-	// Replace problematic characters with safe alternatives
-	result := ""
-	for _, r := range topic {
-		switch r {
-		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
-			result += "_"
-		case '+':
-			result += "plus"
-		case '#':
-			result += "hash"
-		default:
-			result += string(r)
-		}
+	// Create messages table for all message storage
+	messagesSQL := `
+	CREATE TABLE IF NOT EXISTS messages (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		topic TEXT NOT NULL,
+		payload BLOB,
+		qos INTEGER NOT NULL,
+		retain BOOLEAN NOT NULL,
+		client_id TEXT NOT NULL,
+		timestamp INTEGER NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_messages_topic ON messages(topic);
+	CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+	`
+	
+	if _, err := db.Exec(messagesSQL); err != nil {
+		return fmt.Errorf("failed to create messages table: %w", err)
 	}
-	return result
+	
+	return nil
 }
 
-// getTopicFromWALFile extracts topic name from WAL filename
-func getTopicFromWALFile(walFile string) string {
-	base := filepath.Base(walFile)
-	return base[:len(base)-4] // Remove .wal extension
-}
 
-// badgerLogger adapts zerolog to Badger's logger interface
-type badgerLogger struct {
-	logger zerolog.Logger
-}
 
-func (l *badgerLogger) Errorf(format string, args ...interface{}) {
-	l.logger.Error().Msgf(format, args...)
-}
 
-func (l *badgerLogger) Warningf(format string, args ...interface{}) {
-	l.logger.Warn().Msgf(format, args...)
-}
-
-func (l *badgerLogger) Infof(format string, args ...interface{}) {
-	l.logger.Info().Msgf(format, args...)
-}
-
-func (l *badgerLogger) Debugf(format string, args ...interface{}) {
-	l.logger.Debug().Msgf(format, args...)
-}
 
 // MQTT Hook Interface Implementation
 
@@ -721,7 +266,7 @@ func (m *Manager) ID() string {
 func (m *Manager) Provides(b byte) bool {
 	// Only provide the hooks we actually need for storage functionality
 	switch b {
-	case mqtt.OnConnect, mqtt.OnDisconnect, mqtt.OnPublish, mqtt.OnPublished:
+	case mqtt.OnConnect, mqtt.OnDisconnect, mqtt.OnPublish, mqtt.OnPublished, mqtt.OnRetainMessage, mqtt.OnRetainPublished, mqtt.StoredRetainedMessages:
 		return true
 	default:
 		return false
@@ -769,21 +314,19 @@ func (m *Manager) OnPublish(cl *mqtt.Client, pk packets.Packet) (packets.Packet,
 		Timestamp: time.Now(),
 	}
 
-	// Persist the message
+	// Persist the message to SQLite
 	if err := m.persistMessage(msg); err != nil {
-		m.logger.Error().Err(err).Str("topic", pk.TopicName).Msg("Failed to persist message")
-		return pk, fmt.Errorf("failed to persist message: %w", err)
+		m.logger.Error().Err(err).Str("topic", pk.TopicName).Msg("Failed to persist message to SQLite")
+		return pk, fmt.Errorf("failed to persist message to SQLite: %w", err)
 	}
-
-	// Note: totalMessages already incremented in persistMessage
-	// totalBytes will be updated when actually written to WAL
 
 	m.logger.Debug().
 		Uint64("msg_id", msg.ID).
 		Str("topic", pk.TopicName).
 		Int("payload_size", len(pk.Payload)).
 		Str("client_id", cl.ID).
-		Msg("Message persisted")
+		Bool("retain", pk.FixedHeader.Retain).
+		Msg("Message persisted to SQLite")
 
 	return pk, nil
 }
@@ -801,155 +344,113 @@ func (m *Manager) OnACLCheck(cl *mqtt.Client, topic string, write bool) bool {
 
 // Storage Query Methods
 
-// GetMessagesByTopic retrieves messages for a specific topic from WAL
+// GetMessagesByTopic retrieves messages for a specific topic from SQLite
 func (m *Manager) GetMessagesByTopic(topic string, limit int) ([]*Message, error) {
-	messages := make([]*Message, 0, limit)
+	querySQL := `SELECT id, topic, payload, qos, retain, client_id, timestamp FROM messages WHERE topic = ? ORDER BY id DESC LIMIT ?`
 	
-	// First, get messages from memory buffer for this topic
-	m.memBuffer.mu.RLock()
-	for _, msg := range m.memBuffer.messages {
-		if msg.Topic == topic && len(messages) < limit {
-			messages = append(messages, msg)
-		}
+	rows, err := m.db.Query(querySQL, topic, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query messages by topic: %w", err)
 	}
-	m.memBuffer.mu.RUnlock()
+	defer rows.Close()
 	
-	// If we have enough messages from buffer, return them
-	if len(messages) >= limit {
-		return messages[:limit], nil
-	}
-	
-	// Otherwise, also read from WAL
-	topicWAL, exists := m.topicWALs.Load(topic)
-	if !exists {
-		return messages, nil
-	}
-
-	wal := topicWAL.(*TopicWAL)
-	reader := wal.wal.NewReader()
-	if reader == nil {
-		return messages, nil
-	}
-	defer reader.Close()
-	
-	remainingLimit := limit - len(messages)
-	count := 0
-
-	for count < remainingLimit {
-		_, data, err := reader.Next()
+	var messages []*Message
+	for rows.Next() {
+		var msg Message
+		var timestampNano int64
+		
+		err := rows.Scan(&msg.ID, &msg.Topic, &msg.Payload, &msg.QoS, &msg.Retain, &msg.ClientID, &timestampNano)
 		if err != nil {
-			if err.Error() == "EOF" || err.Error() == "no more entries" {
-				break
-			}
-			return nil, fmt.Errorf("failed to read WAL entry: %w", err)
+			return nil, fmt.Errorf("failed to scan message row: %w", err)
 		}
-
-		msg, err := m.deserializeMessage(data)
-		if err != nil {
-			m.logger.Error().Err(err).Msg("Failed to deserialize message")
-			continue
-		}
-
-		messages = append(messages, msg)
-		count++
+		
+		msg.Timestamp = time.Unix(0, timestampNano)
+		messages = append(messages, &msg)
 	}
-
+	
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during message query iteration: %w", err)
+	}
+	
 	return messages, nil
 }
 
 // GetStats returns storage statistics
 func (m *Manager) GetStats() map[string]interface{} {
-	topicSet := make(map[string]bool)
-	var totalWALSize uint64
-	walStats := make(map[string]interface{})
-
-	// Count topics from WAL files
-	m.topicWALs.Range(func(key, value interface{}) bool {
-		topic := key.(string)
-		topicSet[topic] = true
-		topicWAL := value.(*TopicWAL)
-		if size, err := topicWAL.wal.Size(); err == nil {
-			totalWALSize += size
-		}
-
-		// Collect WAL stats for the first few topics (avoid too much data)
-		if len(topicSet) <= 5 {
-			walStats[topic] = topicWAL.wal.Stats()
-		}
-		return true
-	})
-
-	// Count unique topics from memory buffer
-	m.memBuffer.mu.RLock()
-	for _, msg := range m.memBuffer.messages {
-		topicSet[msg.Topic] = true
+	// Count unique topics from SQLite
+	topicCountSQL := `SELECT COUNT(DISTINCT topic) FROM messages`
+	var topicCount int
+	if err := m.db.QueryRow(topicCountSQL).Scan(&topicCount); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to get topic count from SQLite")
+		topicCount = 0
 	}
-	m.memBuffer.mu.RUnlock()
+
+	// Get database file size
+	var dbSize int64
+	dbSizeSQL := `SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()`
+	if err := m.db.QueryRow(dbSizeSQL).Scan(&dbSize); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to get database size")
+		dbSize = 0
+	}
+
+	// Count retained messages from SQLite
+	var retainedCount int
+	retainedSQL := `SELECT COUNT(*) FROM retained_messages`
+	if err := m.db.QueryRow(retainedSQL).Scan(&retainedCount); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to get retained message count")
+		retainedCount = 0
+	}
 
 	stats := map[string]interface{}{
-		"total_messages":      m.totalMessages.Load(),
-		"total_bytes":         m.totalBytes.Load(),
-		"topic_count":         len(topicSet),
-		"memory_buffer_size":  m.memBuffer.Size(),
-		"memory_buffer_count": m.memBuffer.Count(),
-		"next_message_id":     m.messageID.Load() + 1,
-		"total_wal_size":      totalWALSize,
-		"sync_mode":           m.cfg.Storage.WAL.SyncMode,
-		"force_fsync":         m.cfg.Storage.WAL.ForceFsync,
-		"crash_recovery":      m.cfg.Storage.WAL.CrashRecoveryValidation,
-		"wal_stats_sample":    walStats, // Sample of WAL statistics
-	}
-
-	// Add compaction statistics
-	compactionStats := m.compaction.GetCompactionStats()
-	for k, v := range compactionStats {
-		stats["compaction_"+k] = v
+		"total_messages":    m.totalMessages.Load(),
+		"total_bytes":       m.totalBytes.Load(),
+		"topic_count":       topicCount,
+		"retained_count":    retainedCount,
+		"next_message_id":   m.messageID.Load() + 1,
+		"database_size":     dbSize,
+		"storage_type":      "SQLite with WAL mode",
+		"journal_mode":      "WAL",
+		"synchronous":       "NORMAL",
+		"cache_size":        "50MB",
+		"mmap_size":         "256MB",
 	}
 
 	return stats
 }
 
-// Compact performs WAL compaction for a topic (removes old entries)
+// CompactTopic removes old messages for a topic (SQLite-based cleanup)
 func (m *Manager) CompactTopic(topic string, beforeTimestamp time.Time) error {
-	_, exists := m.topicWALs.Load(topic)
-	if !exists {
-		return fmt.Errorf("topic WAL not found: %s", topic)
+	deleteSQL := `DELETE FROM messages WHERE topic = ? AND timestamp < ?`
+	
+	result, err := m.db.Exec(deleteSQL, topic, beforeTimestamp.UnixNano())
+	if err != nil {
+		return fmt.Errorf("failed to compact topic %s: %w", topic, err)
+	}
+	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected during compaction: %w", err)
 	}
 
-	// This is a placeholder for WAL compaction logic
-	// In a production system, you would implement actual compaction
 	m.logger.Info().
 		Str("topic", topic).
 		Time("before", beforeTimestamp).
-		Msg("WAL compaction requested (not implemented)")
+		Int64("deleted_messages", rowsAffected).
+		Msg("Topic compaction completed")
 
 	return nil
 }
 
-// ForceFlush forces all memory buffers to flush to WAL
+// ForceFlush forces SQLite to sync all data to disk
 func (m *Manager) ForceFlush() error {
-	m.logger.Info().Msg("Force flushing all memory buffers")
+	m.logger.Info().Msg("Force syncing SQLite database to disk")
 
-	// Flush main memory buffer
-	if err := m.flushMemoryBuffer(); err != nil {
-		return fmt.Errorf("failed to flush main memory buffer: %w", err)
+	// Execute PRAGMA wal_checkpoint(FULL) to force WAL checkpoint
+	if _, err := m.db.Exec(`PRAGMA wal_checkpoint(FULL)`); err != nil {
+		return fmt.Errorf("failed to checkpoint WAL: %w", err)
 	}
 
-	// Flush per-topic memory buffers
-	m.topicWALs.Range(func(key, value interface{}) bool {
-		topicWAL := value.(*TopicWAL)
-		messages := topicWAL.memBuffer.Flush()
-		for _, msg := range messages {
-			if err := m.writeMessageToWAL(msg); err != nil {
-				m.logger.Error().Err(err).Uint64("msg_id", msg.ID).Msg("Failed to write message during force flush")
-			}
-		}
-		return true
-	})
-
-	// Force sync all WALs
-	m.syncAllWALs()
-
+	m.logger.Info().Msg("SQLite database sync completed")
 	return nil
 }
 
@@ -972,19 +473,153 @@ func (m *Manager) metricsLoop() {
 
 // reportMetrics reports current storage metrics
 func (m *Manager) reportMetrics() {
-	// Report memory buffer usage
-	bufferUsage := int64(m.memBuffer.Size())
-	m.metrics.RecordWALBufferUsage(bufferUsage)
+	// Get database size for storage usage metrics
+	var dbSize int64
+	dbSizeSQL := `SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()`
+	if err := m.db.QueryRow(dbSizeSQL).Scan(&dbSize); err != nil {
+		m.logger.Error().Err(err).Msg("Failed to get database size for metrics")
+		dbSize = 0
+	}
 
-	// Report per-topic buffer usage as well
-	var totalTopicBufferUsage int64
-	m.topicWALs.Range(func(key, value interface{}) bool {
-		topicWAL := value.(*TopicWAL)
-		totalTopicBufferUsage += int64(topicWAL.memBuffer.Size())
-		return true
-	})
+	// Report storage usage
+	m.metrics.RecordStorageUsage(dbSize)
+}
 
-	// Report total buffer usage (main buffer + all topic buffers)
-	totalBufferUsage := bufferUsage + totalTopicBufferUsage
-	m.metrics.RecordWALBufferUsage(totalBufferUsage)
+// persistRetainedToDB stores a retained message to SQLite for persistence across restarts
+func (m *Manager) persistRetainedToDB(msg *Message) error {
+	insertSQL := `INSERT OR REPLACE INTO retained_messages (topic, payload, qos, client_id, timestamp, msg_id) VALUES (?, ?, ?, ?, ?, ?)`
+	
+	_, err := m.db.Exec(insertSQL, msg.Topic, msg.Payload, msg.QoS, msg.ClientID, msg.Timestamp.UnixNano(), msg.ID)
+	if err != nil {
+		m.logger.Error().
+			Err(err).
+			Str("topic", msg.Topic).
+			Str("client_id", msg.ClientID).
+			Msg("Failed to persist retained message to SQLite")
+		return fmt.Errorf("failed to persist retained message to SQLite: %w", err)
+	}
+	
+	m.logger.Debug().
+		Str("topic", msg.Topic).
+		Str("client_id", msg.ClientID).
+		Int("payload_size", len(msg.Payload)).
+		Uint64("msg_id", msg.ID).
+		Msg("Retained message persisted to SQLite")
+	
+	// Immediately verify the write by reading it back
+	var count int
+	verifySQL := `SELECT COUNT(*) FROM retained_messages WHERE topic = ?`
+	err = m.db.QueryRow(verifySQL, msg.Topic).Scan(&count)
+	if err != nil {
+		m.logger.Error().
+			Err(err).
+			Str("topic", msg.Topic).
+			Msg("Failed to verify retained message write to SQLite")
+		return fmt.Errorf("failed to verify retained message write: %w", err)
+	}
+	
+	if count != 1 {
+		m.logger.Error().
+			Str("topic", msg.Topic).
+			Int("count", count).
+			Msg("Unexpected count after retained message write")
+		return fmt.Errorf("expected count 1, got %d for topic %s", count, msg.Topic)
+	}
+	
+	m.logger.Debug().
+		Str("topic", msg.Topic).
+		Msg("Verified retained message write to SQLite")
+	
+	return nil
+}
+
+// deleteRetainedFromDB removes a retained message from SQLite
+func (m *Manager) deleteRetainedFromDB(topic string) error {
+	deleteSQL := `DELETE FROM retained_messages WHERE topic = ?`
+	
+	result, err := m.db.Exec(deleteSQL, topic)
+	if err != nil {
+		m.logger.Error().
+			Err(err).
+			Str("topic", topic).
+			Msg("Failed to delete retained message from SQLite")
+		return fmt.Errorf("failed to delete retained message from SQLite: %w", err)
+	}
+	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		m.logger.Error().
+			Err(err).
+			Str("topic", topic).
+			Msg("Failed to get rows affected for retained message deletion")
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	
+	m.logger.Debug().
+		Str("topic", topic).
+		Int64("rows_affected", rowsAffected).
+		Msg("Retained message deleted from SQLite")
+	
+	return nil
+}
+
+// recoverRetainedMessages recovers retained messages from SQLite on startup
+func (m *Manager) recoverRetainedMessages() error {
+	m.logger.Info().
+		Str("data_dir", m.cfg.Storage.DataDir).
+		Msg("Recovering retained messages from SQLite")
+	
+	// Also recover message statistics from the messages table
+	recoveryStart := time.Now()
+	var maxID, messageCount uint64
+	
+	// Get max message ID and total message count for proper initialization
+	statsSQL := `SELECT COALESCE(MAX(id), 0), COUNT(*) FROM messages`
+	var maxIDInt64, messageCountInt64 int64
+	err := m.db.QueryRow(statsSQL).Scan(&maxIDInt64, &messageCountInt64)
+	if err != nil {
+		m.logger.Error().Err(err).Msg("Failed to recover message statistics")
+	} else {
+		maxID = uint64(maxIDInt64)
+		messageCount = uint64(messageCountInt64)
+		
+		// Update counters
+		m.messageID.Store(maxID)
+		m.totalMessages.Store(messageCount)
+		
+		m.logger.Info().
+			Uint64("max_message_id", maxID).
+			Uint64("total_messages", messageCount).
+			Msg("Recovered message statistics from SQLite")
+	}
+	
+	// Count total retained messages
+	var totalCount int
+	countSQL := `SELECT COUNT(*) FROM retained_messages`
+	err = m.db.QueryRow(countSQL).Scan(&totalCount)
+	if err != nil {
+		return fmt.Errorf("failed to count retained messages: %w", err)
+	}
+	
+	m.logger.Info().
+		Int("total_retained_messages", totalCount).
+		Msg("SQLite retained message count completed")
+	
+	// SQLite stores retained messages persistently, no need to load into memory
+	// Just validate the database is accessible and log the count
+	var recovered int
+	if totalCount > 0 {
+		recovered = totalCount
+		m.logger.Debug().Int("retained_count", recovered).Msg("Retained messages available in SQLite")
+	}
+	
+	recoveryDuration := time.Since(recoveryStart)
+	m.metrics.RecordRecovery(recoveryDuration)
+	
+	m.logger.Info().
+		Int("recovered_count", recovered).
+		Dur("recovery_duration", recoveryDuration).
+		Msg("Retained message recovery completed")
+	
+	return nil
 }

@@ -29,24 +29,22 @@ mqtt:
 # Storage Configuration - Maximum Performance
 storage:
   data-dir: "./data"
-  wal-dir: "./wal"
-  memory-buffer: 1073741824    # 1GB buffer for maximum throughput
   
-  # WAL Settings - Performance optimized
-  wal:
-    sync-mode: "periodic"      # Delayed sync for maximum throughput
-    sync-interval: 1s          # Longer sync intervals
-    batch-sync-size: 1000      # Not used in periodic mode
-    force-fsync: false         # Disable fsync for speed
-    crash-recovery-validation: false
+  # SQLite Configuration - Maximum performance settings
+  sqlite:
+    cache-size: -204800        # 200MB cache (negative = KB)
+    temp-store: "MEMORY"       # All temp data in memory
+    mmap-size: 1073741824      # 1GB memory-mapped I/O
+    busy-timeout: 5000         # Short timeout for fast failures
+    synchronous: "OFF"         # Maximum performance (less safe)
+    journal-mode: "MEMORY"     # Keep journal in memory
+    foreign-keys: false        # Disable for slight performance gain
     
-  # Compaction Settings - Performance focused
-  compaction:
-    max-message-age: "1h"      # Shorter retention for less storage overhead
-    max-wal-size: 209715200    # 200MB WAL files
-    check-interval: "15m"      # Less frequent compaction
-    concurrent-workers: 4      # More workers for faster compaction
-    batch-size: 2000
+  # Cleanup Settings - Aggressive for performance
+  cleanup:
+    max-message-age: "2h"      # Short retention for performance
+    check-interval: "30m"      # Frequent cleanup
+    batch-size: 2000           # Large batches for efficiency
 
 # Clustering for horizontal scaling
 cluster:

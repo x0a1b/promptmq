@@ -98,10 +98,10 @@ if err != nil {
 ### Manual Metrics Recording
 
 ```go
-// Record WAL operations
-metricsServer.RecordWALWrite(500*time.Microsecond, true)
-metricsServer.RecordWALBufferUsage(1024*1024) // 1MB buffer usage
-metricsServer.RecordWALRecovery(2*time.Second)
+// Record storage operations
+metricsServer.RecordSQLiteWrite(500*time.Microsecond, true)
+metricsServer.RecordStorageUsage(1024*1024) // 1MB storage usage
+metricsServer.RecordRecovery(2*time.Second)
 
 // Record throughput
 metricsServer.RecordThroughput(50000.0) // 50K msg/sec

@@ -251,7 +251,7 @@ func BenchmarkMetricsOverhead_SystemMetricsCollection(b *testing.B) {
 	}
 }
 
-func BenchmarkMetricsOverhead_WALMetricsRecording(b *testing.B) {
+func BenchmarkMetricsOverhead_StorageMetricsRecording(b *testing.B) {
 	server := createTestMetricsServer(&testing.T{})
 
 	latencies := []time.Duration{
@@ -271,7 +271,7 @@ func BenchmarkMetricsOverhead_WALMetricsRecording(b *testing.B) {
 			latency := latencies[latencyIdx%len(latencies)]
 			success := latencyIdx%2 == 0
 
-			server.RecordWALWrite(latency, success)
+			server.RecordSQLiteWrite(latency, success)
 			latencyIdx++
 		}
 	})

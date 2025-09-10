@@ -4,22 +4,22 @@ import "time"
 
 // StorageMetrics defines the interface for storage layer metrics integration
 type StorageMetrics interface {
-	// RecordWALWrite records WAL write metrics (latency and success/failure)
-	RecordWALWrite(latency time.Duration, success bool)
+	// RecordSQLiteWrite records SQLite write metrics (latency and success/failure)
+	RecordSQLiteWrite(latency time.Duration, success bool)
 
-	// RecordWALBufferUsage records current WAL buffer usage in bytes
-	RecordWALBufferUsage(bytes int64)
+	// RecordStorageUsage records current storage usage in bytes
+	RecordStorageUsage(bytes int64)
 
-	// RecordWALRecovery records WAL recovery duration
-	RecordWALRecovery(duration time.Duration)
+	// RecordRecovery records recovery duration
+	RecordRecovery(duration time.Duration)
 }
 
 // NoOpStorageMetrics provides a no-op implementation for testing
 type NoOpStorageMetrics struct{}
 
-func (n *NoOpStorageMetrics) RecordWALWrite(latency time.Duration, success bool) {}
-func (n *NoOpStorageMetrics) RecordWALBufferUsage(bytes int64)                   {}
-func (n *NoOpStorageMetrics) RecordWALRecovery(duration time.Duration)           {}
+func (n *NoOpStorageMetrics) RecordSQLiteWrite(latency time.Duration, success bool) {}
+func (n *NoOpStorageMetrics) RecordStorageUsage(bytes int64)                        {}
+func (n *NoOpStorageMetrics) RecordRecovery(duration time.Duration)                 {}
 
 // Ensure Server implements StorageMetrics interface at compile time
 var _ StorageMetrics = (*Server)(nil)

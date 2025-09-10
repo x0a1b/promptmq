@@ -25,27 +25,25 @@ mqtt:
   wildcard-available: true
   shared-sub-available: true
 
-# Storage Configuration
+# Storage Configuration - Development Optimized
 storage:
   data-dir: "./dev-data"       # Separate directory for dev data
-  wal-dir: "./dev-wal"
-  memory-buffer: 67108864      # 64MB buffer for development
   
-  # WAL Settings - Balanced for development
-  wal:
-    sync-mode: "batch"         # Balanced performance for development
-    sync-interval: 100ms
-    batch-sync-size: 50
-    force-fsync: false
-    crash-recovery-validation: true
+  # SQLite Configuration - Development friendly
+  sqlite:
+    cache-size: 10000          # 10k pages (~40MB cache)
+    temp-store: "MEMORY"       # Use memory for temp storage
+    mmap-size: 134217728       # 128MB memory-mapped I/O
+    busy-timeout: 10000        # 10 second timeout
+    synchronous: "NORMAL"      # Safe but not too slow
+    journal-mode: "WAL"        # WAL mode for consistency
+    foreign-keys: true         # Enable for data integrity testing
     
-  # Compaction Settings
-  compaction:
-    max-message-age: "30m"     # Shorter retention for development
-    max-wal-size: 10485760     # 10MB for faster compaction testing
-    check-interval: "1m"       # More frequent compaction checks
-    concurrent-workers: 1
-    batch-size: 100
+  # Cleanup Settings - Short retention for dev
+  cleanup:
+    max-message-age: "1h"      # 1 hour retention for development
+    check-interval: "10m"      # Check every 10 minutes
+    batch-size: 100            # Smaller batches
 
 # Clustering Disabled for Development
 cluster:

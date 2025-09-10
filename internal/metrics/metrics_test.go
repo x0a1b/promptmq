@@ -39,7 +39,7 @@ func TestMetricsServer_New(t *testing.T) {
 	assert.NotNil(t, server.registry)
 	assert.NotNil(t, server.connectionsTotal)
 	assert.NotNil(t, server.messagesPublishedTotal)
-	assert.NotNil(t, server.walWriteLatencyHist)
+	assert.NotNil(t, server.storageWriteLatencyHist)
 }
 
 func TestMetricsServer_StartStop(t *testing.T) {
@@ -241,18 +241,18 @@ func TestMetricsHooks_OnUnsubscribe(t *testing.T) {
 	assert.Equal(t, packet, returnedPacket)
 }
 
-func TestMetricsServer_WALMetrics(t *testing.T) {
+func TestMetricsServer_StorageMetrics(t *testing.T) {
 	server := createTestMetricsServer(t)
 
-	// Test WAL write recording
-	server.RecordWALWrite(500*time.Microsecond, true)
-	server.RecordWALWrite(1*time.Millisecond, false)
+	// Test SQLite write recording
+	server.RecordSQLiteWrite(500*time.Microsecond, true)
+	server.RecordSQLiteWrite(1*time.Millisecond, false)
 
-	// Test WAL buffer usage
-	server.RecordWALBufferUsage(1024 * 1024) // 1MB
+	// Test storage usage recording
+	server.RecordStorageUsage(1024 * 1024) // 1MB
 
-	// Test WAL recovery time
-	server.RecordWALRecovery(2 * time.Second)
+	// Test recovery time recording
+	server.RecordRecovery(2 * time.Second)
 
 	// Verify no panics and metrics are recorded
 	// The exact values are harder to verify due to histogram complexity
@@ -462,4 +462,138 @@ func getGaugeValue(t *testing.T, gauge prometheus.Gauge) float64 {
 	err := gauge.Write(dto)
 	require.NoError(t, err)
 	return dto.Gauge.GetValue()
+}
+
+// Additional hook method tests for coverage
+func TestMetricsHooks_SetOpts(t *testing.T) {
+	server := createTestMetricsServer(t)
+	
+	// Test SetOpts doesn't panic
+	assert.NotPanics(t, func() {
+		server.SetOpts(nil, nil)
+	})
+}
+
+func TestMetricsHooks_OnStarted(t *testing.T) {
+	server := createTestMetricsServer(t)
+	
+	// Test OnStarted doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnStarted()
+	})
+}
+
+func TestMetricsHooks_OnStopped(t *testing.T) {
+	server := createTestMetricsServer(t)
+	
+	// Test OnStopped doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnStopped()
+	})
+}
+
+func TestMetricsHooks_OnPublished(t *testing.T) {
+	server := createTestMetricsServer(t)
+	client := &mqtt.Client{ID: "test-client"}
+	
+	packet := packets.Packet{
+		FixedHeader: packets.FixedHeader{Type: packets.Publish},
+		TopicName:   "test/topic",
+		Payload:     []byte("test"),
+	}
+	
+	// Test OnPublished doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnPublished(client, packet)
+	})
+}
+
+func TestMetricsHooks_OnPacketRead(t *testing.T) {
+	server := createTestMetricsServer(t)
+	client := &mqtt.Client{ID: "test-client"}
+	
+	packet := packets.Packet{
+		FixedHeader: packets.FixedHeader{Type: packets.Publish},
+		TopicName:   "test/topic",
+		Payload:     []byte("test"),
+	}
+	
+	returnedPacket, err := server.OnPacketRead(client, packet)
+	assert.NoError(t, err)
+	assert.Equal(t, packet, returnedPacket)
+}
+
+func TestMetricsHooks_OnPacketEncode(t *testing.T) {
+	server := createTestMetricsServer(t)
+	client := &mqtt.Client{ID: "test-client"}
+	
+	packet := packets.Packet{
+		FixedHeader: packets.FixedHeader{Type: packets.Publish},
+		TopicName:   "test/topic",
+		Payload:     []byte("test"),
+	}
+	
+	returnedPacket := server.OnPacketEncode(client, packet)
+	assert.Equal(t, packet, returnedPacket)
+}
+
+func TestMetricsHooks_OnPacketSent(t *testing.T) {
+	server := createTestMetricsServer(t)
+	client := &mqtt.Client{ID: "test-client"}
+	
+	packet := packets.Packet{
+		FixedHeader: packets.FixedHeader{Type: packets.Publish},
+		TopicName:   "test/topic",
+		Payload:     []byte("test"),
+	}
+	
+	// Test OnPacketSent doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnPacketSent(client, packet, []byte("test"))
+	})
+}
+
+func TestMetricsHooks_OnPacketProcessed(t *testing.T) {
+	server := createTestMetricsServer(t)
+	client := &mqtt.Client{ID: "test-client"}
+	
+	packet := packets.Packet{
+		FixedHeader: packets.FixedHeader{Type: packets.Publish},
+		TopicName:   "test/topic",
+		Payload:     []byte("test"),
+	}
+	
+	// Test OnPacketProcessed doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnPacketProcessed(client, packet, nil)
+		server.OnPacketProcessed(client, packet, fmt.Errorf("test error"))
+	})
+}
+
+func TestMetricsHooks_OnSysInfoTick(t *testing.T) {
+	server := createTestMetricsServer(t)
+	
+	// Test OnSysInfoTick doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnSysInfoTick(nil)
+	})
+}
+
+func TestMetricsHooks_OnRetainPublished(t *testing.T) {
+	server := createTestMetricsServer(t)
+	client := &mqtt.Client{ID: "test-client"}
+	
+	packet := packets.Packet{
+		FixedHeader: packets.FixedHeader{
+			Type:   packets.Publish,
+			Retain: true,
+		},
+		TopicName: "test/topic",
+		Payload:   []byte("retained message"),
+	}
+	
+	// Test OnRetainPublished doesn't panic
+	assert.NotPanics(t, func() {
+		server.OnRetainPublished(client, packet)
+	})
 }
