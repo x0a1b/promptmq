@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 // CrashPoint defines where in the process to simulate a crash
@@ -91,13 +91,15 @@ func (cs *CrashSimulator) SimulateCrashAfterWrites(t *testing.T, messageCount in
 		// Simulate abrupt termination (no graceful shutdown)
 		manager1.cancel() // Simulate crash by canceling context abruptly
 		// Properly close the database to release locks
-		manager1.StopManager()
+		err = manager1.StopManager()
+		require.NoError(t, err)
 
 		// Phase 2: Attempt recovery with new manager
-		time.Sleep(50 * time.Millisecond) // Brief delay to simulate restart
+		// Wait longer for BadgerDB to release locks completely
+		time.Sleep(200 * time.Millisecond)
 
-		manager2, err := New(cfg, cs.logger)
-		require.NoError(t, err)
+		// Create recovery manager with retry logic
+		manager2 := createManagerWithRetry(t, cfg, cs.logger)
 		defer manager2.StopManager()
 
 		ctx2, cancel2 := context.WithCancel(context.Background())
@@ -274,10 +276,14 @@ func TestWALConsistencyAfterCrash(t *testing.T) {
 
 	// Abrupt shutdown
 	manager1.cancel()
+	err = manager1.StopManager() 
+	require.NoError(t, err)
+	
+	// Wait for BadgerDB to release locks
+	time.Sleep(200 * time.Millisecond)
 
 	// Recovery with new manager
-	manager2, err := New(cfg, createCrashTestLogger())
-	require.NoError(t, err)
+	manager2 := createManagerWithRetry(t, cfg, createCrashTestLogger())
 	defer manager2.StopManager()
 
 	err = manager2.Start(ctx)
@@ -333,10 +339,14 @@ func TestPartialWriteRecovery(t *testing.T) {
 
 	// Simulate crash (some messages might be in buffer)
 	manager.cancel()
+	err = manager.StopManager()
+	require.NoError(t, err)
+	
+	// Wait for BadgerDB to release locks
+	time.Sleep(200 * time.Millisecond)
 
 	// Recovery should handle partial writes gracefully
-	manager2, err := New(cfg, createCrashTestLogger())
-	require.NoError(t, err)
+	manager2 := createManagerWithRetry(t, cfg, createCrashTestLogger())
 	defer manager2.StopManager()
 
 	err = manager2.Start(ctx)
@@ -432,11 +442,14 @@ func TestConcurrentWriteCrashRecovery(t *testing.T) {
 		}
 	}
 
-	// Recovery phase
-	time.Sleep(100 * time.Millisecond)
-
-	manager2, err := New(cfg, createCrashTestLogger())
+	// Properly stop manager and wait for cleanup
+	err = manager.StopManager()
 	require.NoError(t, err)
+
+	// Recovery phase - wait for BadgerDB to release locks
+	time.Sleep(300 * time.Millisecond)
+
+	manager2 := createManagerWithRetry(t, cfg, createCrashTestLogger())
 	defer manager2.StopManager()
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
@@ -506,10 +519,14 @@ func TestCompactionCrashSafety(t *testing.T) {
 
 	// Simulate crash during potential compaction
 	manager.cancel()
+	err = manager.StopManager()
+	require.NoError(t, err)
+
+	// Wait for BadgerDB to release locks
+	time.Sleep(200 * time.Millisecond)
 
 	// Recovery should handle any partial compaction state
-	manager2, err := New(cfg, createCrashTestLogger())
-	require.NoError(t, err)
+	manager2 := createManagerWithRetry(t, cfg, createCrashTestLogger())
 	defer manager2.StopManager()
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
@@ -643,10 +660,14 @@ func TestZeroDataLossGuarantee(t *testing.T) {
 
 			// Immediate crash simulation
 			manager.cancel()
+			err = manager.StopManager()
+			require.NoError(t, err)
+
+			// Wait for BadgerDB to release locks
+			time.Sleep(200 * time.Millisecond)
 
 			// Recovery phase
-			manager2, err := New(cfg, createCrashTestLogger())
-			require.NoError(t, err)
+			manager2 := createManagerWithRetry(t, cfg, createCrashTestLogger())
 			defer manager2.StopManager()
 
 			ctx2, cancel2 := context.WithCancel(context.Background())
@@ -718,12 +739,14 @@ func TestCrashRecoveryPerformance(t *testing.T) {
 			}
 
 			manager1.cancel()
+			err = manager1.StopManager()
+			require.NoError(t, err)
 
 			// Phase 2: Measure recovery time
-			time.Sleep(10 * time.Millisecond)
+			// Wait for BadgerDB to release locks
+			time.Sleep(200 * time.Millisecond)
 
-			manager2, err := New(cfg, createCrashTestLogger())
-			require.NoError(t, err)
+			manager2 := createManagerWithRetry(t, cfg, createCrashTestLogger())
 			defer manager2.StopManager()
 
 			ctx2, cancel2 := context.WithCancel(context.Background())
@@ -747,11 +770,28 @@ func TestCrashRecoveryPerformance(t *testing.T) {
 
 // Helper functions
 
+// createManagerWithRetry creates a new manager with retry logic for BadgerDB lock conflicts
+func createManagerWithRetry(t *testing.T, cfg *config.Config, logger zerolog.Logger) *Manager {
+	var manager *Manager
+	var err error
+	
+	for attempt := 0; attempt < 5; attempt++ {
+		manager, err = New(cfg, logger)
+		if err == nil {
+			return manager
+		}
+		t.Logf("Attempt %d failed to create manager: %v, retrying...", attempt+1, err)
+		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+	}
+	require.NoError(t, err)
+	return manager
+}
+
 func createCrashTestConfig(t *testing.T) *config.Config {
 	// Create a unique temporary directory for this specific test
 	baseDir := t.TempDir()
-	// Add more uniqueness to avoid conflicts
-	unique := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
+	// Add more uniqueness to avoid conflicts between parallel tests
+	unique := fmt.Sprintf("%s_%d_%d", t.Name(), time.Now().UnixNano(), os.Getpid())
 
 	cfg := &config.Config{
 		Storage: config.StorageConfig{

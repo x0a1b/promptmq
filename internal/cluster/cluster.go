@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/rs/zerolog"
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 type Manager struct {

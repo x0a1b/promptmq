@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zohaib-hassan/promptmq/internal/broker"
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/broker"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 const (

@@ -1,4 +1,4 @@
-module github.com/zohaib-hassan/promptmq
+module github.com/x0a1b/promptmq
 
 go 1.25.1
 

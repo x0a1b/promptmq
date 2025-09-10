@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)](https://github.com/zohaib-hassan/promptmq)
+[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen)](https://github.com/x0a1b/promptmq)
 [![Coverage](https://img.shields.io/badge/Coverage-95%25-brightgreen)](#testing)
 
 **PromptMQ** is a high-performance, enterprise-grade MQTT v5 broker built in Go, designed for applications requiring extreme throughput, low latency, and bulletproof reliability.
@@ -82,14 +82,14 @@ PromptMQ uses a hybrid architecture combining the best of both worlds:
 **Option 1: Pre-built Binaries**
 ```bash
 # Download latest release
-curl -L https://github.com/zohaib-hassan/promptmq/releases/latest/download/promptmq-linux-amd64 -o promptmq
+curl -L https://github.com/x0a1b/promptmq/releases/latest/download/promptmq-linux-amd64 -o promptmq
 chmod +x promptmq
 sudo mv promptmq /usr/local/bin/
 ```
 
 **Option 2: Build from Source**
 ```bash
-git clone https://github.com/zohaib-hassan/promptmq.git
+git clone https://github.com/x0a1b/promptmq.git
 cd promptmq
 ./build.sh build
 sudo ./build.sh install
@@ -605,7 +605,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ### Development Setup
 ```bash
-git clone https://github.com/zohaib-hassan/promptmq.git
+git clone https://github.com/x0a1b/promptmq.git
 cd promptmq
 ./build.sh deps
 ./build.sh dev  # Start development server
@@ -628,9 +628,9 @@ PromptMQ is released under the [MIT License](LICENSE).
 
 ## 📞 Support
 
-- **Documentation**: [Wiki](https://github.com/zohaib-hassan/promptmq/wiki)
-- **Issues**: [GitHub Issues](https://github.com/zohaib-hassan/promptmq/issues)  
-- **Discussions**: [GitHub Discussions](https://github.com/zohaib-hassan/promptmq/discussions)
+- **Documentation**: [Wiki](https://github.com/x0a1b/promptmq/wiki)
+- **Issues**: [GitHub Issues](https://github.com/x0a1b/promptmq/issues)  
+- **Discussions**: [GitHub Discussions](https://github.com/x0a1b/promptmq/discussions)
 - **Security**: security@promptmq.com
 
 ---

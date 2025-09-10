@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 // Performance benchmarks to validate <1µs overhead requirement for 1M+ msg/sec

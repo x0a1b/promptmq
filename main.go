@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/zohaib-hassan/promptmq/cmd"
+	"github.com/x0a1b/promptmq/cmd"
 )
 
 func main() {

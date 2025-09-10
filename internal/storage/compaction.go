@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 // CompactionManager handles WAL file compaction with priority-based scheduling

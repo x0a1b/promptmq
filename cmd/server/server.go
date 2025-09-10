@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/zohaib-hassan/promptmq/internal/broker"
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/broker"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 var ServerCmd = &cobra.Command{

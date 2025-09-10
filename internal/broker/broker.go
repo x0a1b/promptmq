@@ -12,10 +12,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/zohaib-hassan/promptmq/internal/cluster"
-	"github.com/zohaib-hassan/promptmq/internal/config"
-	"github.com/zohaib-hassan/promptmq/internal/metrics"
-	"github.com/zohaib-hassan/promptmq/internal/storage"
+	"github.com/x0a1b/promptmq/internal/cluster"
+	"github.com/x0a1b/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/metrics"
+	"github.com/x0a1b/promptmq/internal/storage"
 )
 
 type Broker struct {

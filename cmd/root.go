@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/zohaib-hassan/promptmq/cmd/server"
+	"github.com/x0a1b/promptmq/cmd/server"
 )
 
 var cfgFile string

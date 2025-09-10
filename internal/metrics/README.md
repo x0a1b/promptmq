@@ -42,8 +42,8 @@ type MetricsConfig struct {
 
 ```go
 import (
-    "github.com/zohaib-hassan/promptmq/internal/config"
-    "github.com/zohaib-hassan/promptmq/internal/metrics"
+    "github.com/x0a1b/promptmq/internal/config"
+    "github.com/x0a1b/promptmq/internal/metrics"
 )
 
 cfg := &config.Config{

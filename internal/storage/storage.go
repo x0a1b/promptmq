@@ -15,7 +15,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/packets"
 	"github.com/rs/zerolog"
 
-	"github.com/zohaib-hassan/promptmq/internal/config"
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 // Message represents a persisted MQTT message
