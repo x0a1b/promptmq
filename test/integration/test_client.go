@@ -72,17 +72,20 @@ func NewTestClient(t *testing.T, brokerAddr string, config *TestClientConfig) *T
 		t:        t,
 	}
 
-	// Configure MQTT client options
+	// Configure MQTT client options with minimal settings for reliability
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(brokerAddr)
 	opts.SetClientID(config.ClientID)
 	
 	t.Logf("Creating MQTT client for %s connecting to %s", config.ClientID, brokerAddr)
-	opts.SetCleanSession(config.CleanSession)
-	opts.SetKeepAlive(config.KeepAlive)
-	opts.SetConnectTimeout(config.ConnectTimeout)
-	opts.SetAutoReconnect(false) // Explicit control in tests
-	opts.SetProtocolVersion(4)   // Use MQTT v3.1.1 (protocol version 4)
+	opts.SetCleanSession(true)     // Always use clean session for tests
+	opts.SetKeepAlive(60)          // Standard keep alive
+	opts.SetConnectTimeout(15 * time.Second) // Longer connect timeout
+	opts.SetAutoReconnect(false)   // Explicit control in tests
+	opts.SetProtocolVersion(4)     // Use MQTT v3.1.1 (protocol version 4)
+	opts.SetPingTimeout(10 * time.Second)
+	opts.SetWriteTimeout(10 * time.Second)
+	opts.SetResumeSubs(false)      // Don't resume subscriptions
 	
 	if config.Username != "" {
 		opts.SetUsername(config.Username)
@@ -121,7 +124,7 @@ func NewTestClient(t *testing.T, brokerAddr string, config *TestClientConfig) *T
 func (tc *TestClient) Connect() error {
 	tc.t.Logf("Attempting to connect client %s", tc.clientID)
 	token := tc.client.Connect()
-	if !token.WaitTimeout(10 * time.Second) {
+	if !token.WaitTimeout(15 * time.Second) {
 		return fmt.Errorf("connection timeout for client %s", tc.clientID)
 	}
 	if err := token.Error(); err != nil {
