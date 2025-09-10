@@ -109,3 +109,6 @@ certs/
 # Docker overrides
 Dockerfile.local
 docker-compose.override.yml
+
+# Claude Code local settings
+.claude/settings.local.json
