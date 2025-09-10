@@ -261,25 +261,51 @@ storage:
 
 ## 📈 Performance Benchmarks
 
-### **Metrics System Performance**
-```
-BenchmarkMetrics_OnPublish-16                   38,905,890 ops    130.5 ns/op    0 B/op    0 allocs/op
-BenchmarkMetrics_AtomicOperations-16           100,000,000 ops     57.94 ns/op    0 B/op    0 allocs/op
-BenchmarkMetricsOverhead_ZeroAllocation-16   1,000,000,000 ops      2.853 ns/op    0 B/op    0 allocs/op
-```
+### **Core Performance Metrics (Apple M4 Max)**
 
-### **Key Performance Metrics**
-- **Message Processing**: 130.5ns per operation (7.6M+ msg/sec theoretical)
-- **Atomic Operations**: 57.94ns per operation (17.2M+ ops/sec)
-- **Zero-Allocation Paths**: 2.853ns per operation
-- **Parallel Processing**: 432.7ns per operation under high concurrency
-- **Connection Operations**: 147.3ns per connect/disconnect cycle
+| Benchmark | Operations/sec | Latency | Memory Usage | Allocations |
+|-----------|----------------|---------|--------------|-------------|
+| **Message Processing** | 7.7M+ ops/sec | 130.0 ns/op | 0 B/op | 0 allocs/op |
+| **Atomic Operations** | 16.8M+ ops/sec | 59.63 ns/op | 0 B/op | 0 allocs/op |
+| **Prometheus Counter** | 16.4M+ ops/sec | 60.91 ns/op | 0 B/op | 0 allocs/op |
+| **Zero-Allocation Paths** | 368M+ ops/sec | 2.716 ns/op | 0 B/op | 0 allocs/op |
+| **Single Thread Processing** | 7.7M+ ops/sec | 129.2 ns/op | 0 B/op | 0 allocs/op |
+
+### **Concurrent Performance Benchmarks**
+
+| Benchmark | Performance | Latency | Memory | Allocations | Use Case |
+|-----------|-------------|---------|--------|-------------|----------|
+| **Parallel Processing** | 2.2M+ ops/sec | 447.7 ns/op | 0 B/op | 0 allocs/op | High concurrency |
+| **Connection Operations** | 7.3M+ ops/sec | 136.9 ns/op | 32 B/op | 2 allocs/op | Connect/Disconnect |
+| **High Throughput Simulation** | 2.2M+ ops/sec | 462.0 ns/op | 0 B/op | 0 allocs/op | Production load |
+| **Concurrent Access** | 2.2M+ ops/sec | 445.1 ns/op | 0 B/op | 0 allocs/op | Multi-client |
+| **Topic Metrics** | 2.2M+ ops/sec | 466.4 ns/op | 16 B/op | 1 allocs/op | Topic tracking |
+
+### **Specialized Performance Tests**
+
+| Benchmark | Performance | Latency | Description |
+|-----------|-------------|---------|-------------|
+| **Wildcard Filtering** | 2.7B+ ops/sec | 0.37 ns/op | Topic wildcard matching |
+| **Storage Metrics** | 1.9M+ ops/sec | 522.0 ns/op | SQLite operations tracking |
+| **System Metrics** | 45K+ ops/sec | 22,196 ns/op | System resource monitoring |
+
+### **SQLite Configuration Performance**
+
+Based on integration test results, different SQLite configurations show varying throughput:
+
+| Configuration | Throughput Range | Cache Size | Sync Mode | Memory Map | Best For |
+|---------------|------------------|------------|-----------|------------|----------|
+| **High Performance** | 750-1,200 msg/sec | 100MB | NORMAL | 512MB | Maximum throughput |
+| **Memory Optimized** | 800-1,400 msg/sec | 200MB | OFF | 50MB | RAM-constrained |
+| **Balanced** | 400-700 msg/sec | 40MB | NORMAL | 5MB | General production |
+| **High Durability** | 200-400 msg/sec | 20MB | FULL | 1MB | Financial/critical |
+| **Development** | 300-600 msg/sec | 8MB | NORMAL | 10MB | Local development |
 
 ### **Memory Efficiency**
-- **Zero allocations** in critical message processing paths
-- **0 bytes allocated** per message operation
-- **Configurable memory usage** through SQLite cache tuning
-- **Efficient connection pooling** with minimal overhead
+- **Zero allocations** in critical message processing paths (0 B/op, 0 allocs/op)
+- **Ultra-low memory overhead** with configurable SQLite caching
+- **Efficient goroutine management** with minimal connection overhead
+- **Optimized data structures** for high-frequency operations
 
 ## 🧪 Testing & Quality Assurance
 
