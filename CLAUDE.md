@@ -264,6 +264,12 @@ storage:
 3. **Concurrent Performance**: Additional concurrency optimizations
 4. **Storage Efficiency**: Advanced compression and storage optimization
 
+### Testing & validation (must)
+1. Unit tests + integration tests + golden prompt tests: keep a repo of golden prompts + expected outputs; run them in CI and fail on drift beyond a threshold.
+2. Adversarial test suite: fuzz prompts, inject malicious instructions, try prompt-injection patterns and ensure the model obeys constraints.
+3. Human-in-the-loop review: require human review for higher-risk PRs (security, billing, infra, third-party API changes).
+4. Regression monitoring: track model quality over time (precision/recall for tasks with ground truth; human evals for open tasks).
+
 ---
 
 **This project represents a complete, production-ready MQTT broker with enterprise-grade performance, comprehensive SQLite optimization, and professional-quality documentation ready for immediate deployment.**
