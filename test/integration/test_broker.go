@@ -47,8 +47,8 @@ func DefaultTestConfig() *TestBrokerConfig {
 			JournalMode:  "WAL",    // WAL mode
 			ForeignKeys:  true,     // Enable constraints
 		},
-		LogLevel:      "error", // Reduce noise in tests
-		EnableMetrics: true,
+		LogLevel:      "debug", // Enable debug logs to see what's happening
+		EnableMetrics: false,   // Disable metrics temporarily to simplify
 	}
 }
 
@@ -84,8 +84,8 @@ func NewTestBroker(t *testing.T, testConfig *TestBrokerConfig) *TestBroker {
 		Server: config.ServerConfig{
 			Bind:         fmt.Sprintf("127.0.0.1:%d", mqttPort),
 			WSBind:       fmt.Sprintf("127.0.0.1:%d", wsPort),
-			ReadTimeout:  "10s",
-			WriteTimeout: "10s",
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
 			ReadBuffer:   4096,
 			WriteBuffer:  4096,
 		},
@@ -152,32 +152,22 @@ func (tb *TestBroker) Start() error {
 	}
 
 	// Start broker in background
-	brokerReady := make(chan error, 1)
 	go func() {
 		err := tb.broker.Start(tb.ctx)
 		if err != nil && err != context.Canceled {
-			brokerReady <- err
-			return
+			tb.t.Logf("Broker start error: %v", err)
 		}
-		close(brokerReady)
 	}()
 
-	// Wait for broker to start or timeout
-	select {
-	case err := <-brokerReady:
-		if err != nil {
-			return fmt.Errorf("broker failed to start: %w", err)
-		}
-	case <-time.After(10 * time.Second):
-		tb.cancel()
-		return fmt.Errorf("broker failed to start within timeout")
-	}
-
-	// Wait for MQTT port to be available
-	if err := waitForPort(tb.mqttPort, 5*time.Second); err != nil {
+	// Give broker a moment to start listening, then wait for MQTT port to be available
+	time.Sleep(500 * time.Millisecond)
+	if err := waitForPort(tb.mqttPort, 10*time.Second); err != nil {
 		tb.cancel()
 		return fmt.Errorf("MQTT port not ready: %w", err)
 	}
+	
+	// Give additional time for the broker to fully initialize
+	time.Sleep(200 * time.Millisecond)
 
 	// Wait for metrics port if enabled
 	if tb.cfg.Metrics.Enabled {

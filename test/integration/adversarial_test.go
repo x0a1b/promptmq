@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

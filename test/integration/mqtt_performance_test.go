@@ -9,17 +9,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/x0a1b/promptmq/internal/config"
 )
 
 // TestMQTTHighThroughput tests high-throughput message publishing and delivery
 func TestMQTTHighThroughput(t *testing.T) {
 	// Use high-performance configuration
-	config := DefaultTestConfig()
-	config.SQLiteConfig.CacheSize = 10000    // Larger cache for performance
-	config.SQLiteConfig.Synchronous = "OFF"  // Maximum performance mode
-	config.SQLiteConfig.JournalMode = "MEMORY" // In-memory journal for speed
+	testConfig := DefaultTestConfig()
+	testConfig.SQLiteConfig.CacheSize = 10000    // Larger cache for performance
+	testConfig.SQLiteConfig.Synchronous = "OFF"  // Maximum performance mode
+	testConfig.SQLiteConfig.JournalMode = "MEMORY" // In-memory journal for speed
 	
-	broker := NewTestBroker(t, config)
+	broker := NewTestBroker(t, testConfig)
 	require.NoError(t, broker.Start())
 
 	publisher := NewTestClient(t, broker.MQTTAddress(), &TestClientConfig{
@@ -86,10 +88,10 @@ func TestMQTTHighThroughput(t *testing.T) {
 
 // TestMQTTConcurrentClients tests performance with multiple concurrent clients
 func TestMQTTConcurrentClients(t *testing.T) {
-	config := DefaultTestConfig()
-	config.SQLiteConfig.CacheSize = 20000 // Large cache for concurrent access
+	testConfig := DefaultTestConfig()
+	testConfig.SQLiteConfig.CacheSize = 20000 // Large cache for concurrent access
 	
-	broker := NewTestBroker(t, config)
+	broker := NewTestBroker(t, testConfig)
 	require.NoError(t, broker.Start())
 
 	numPublishers := 5
@@ -185,10 +187,10 @@ func TestMQTTConcurrentClients(t *testing.T) {
 
 // TestMQTTMemoryEfficiency tests memory usage during high-load scenarios
 func TestMQTTMemoryEfficiency(t *testing.T) {
-	config := DefaultTestConfig()
-	config.SQLiteConfig.CacheSize = 5000 // Moderate cache to test memory efficiency
+	testConfig := DefaultTestConfig()
+	testConfig.SQLiteConfig.CacheSize = 5000 // Moderate cache to test memory efficiency
 	
-	broker := NewTestBroker(t, config)
+	broker := NewTestBroker(t, testConfig)
 	require.NoError(t, broker.Start())
 
 	publisher := NewTestClient(t, broker.MQTTAddress(), &TestClientConfig{
@@ -261,10 +263,10 @@ func TestMQTTMemoryEfficiency(t *testing.T) {
 
 // TestMQTTConnectionScaling tests broker behavior with many simultaneous connections
 func TestMQTTConnectionScaling(t *testing.T) {
-	config := DefaultTestConfig()
-	config.SQLiteConfig.CacheSize = 15000 // Large cache for many connections
+	testConfig := DefaultTestConfig()
+	testConfig.SQLiteConfig.CacheSize = 15000 // Large cache for many connections
 	
-	broker := NewTestBroker(t, config)
+	broker := NewTestBroker(t, testConfig)
 	require.NoError(t, broker.Start())
 
 	numConnections := 50

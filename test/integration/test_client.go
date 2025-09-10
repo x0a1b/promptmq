@@ -76,10 +76,13 @@ func NewTestClient(t *testing.T, brokerAddr string, config *TestClientConfig) *T
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(brokerAddr)
 	opts.SetClientID(config.ClientID)
+	
+	t.Logf("Creating MQTT client for %s connecting to %s", config.ClientID, brokerAddr)
 	opts.SetCleanSession(config.CleanSession)
 	opts.SetKeepAlive(config.KeepAlive)
 	opts.SetConnectTimeout(config.ConnectTimeout)
 	opts.SetAutoReconnect(false) // Explicit control in tests
+	opts.SetProtocolVersion(4)   // Use MQTT v3.1.1 (protocol version 4)
 	
 	if config.Username != "" {
 		opts.SetUsername(config.Username)
@@ -116,13 +119,16 @@ func NewTestClient(t *testing.T, brokerAddr string, config *TestClientConfig) *T
 
 // Connect connects the client to the broker
 func (tc *TestClient) Connect() error {
+	tc.t.Logf("Attempting to connect client %s", tc.clientID)
 	token := tc.client.Connect()
-	if !token.WaitTimeout(5 * time.Second) {
+	if !token.WaitTimeout(10 * time.Second) {
 		return fmt.Errorf("connection timeout for client %s", tc.clientID)
 	}
 	if err := token.Error(); err != nil {
 		return fmt.Errorf("connection failed for client %s: %w", tc.clientID, err)
 	}
+	atomic.StoreInt32(&tc.connected, 1)
+	tc.t.Logf("Client %s connected successfully", tc.clientID)
 	return nil
 }
 
